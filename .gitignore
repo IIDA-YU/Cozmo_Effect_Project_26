@@ -1,0 +1,32 @@
+# --- Python (Algorithm & Hardware) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.env
+venv_cozmo/
+
+# --- Node.js / Web (UI Frontend & Backend) ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+
+# --- Build / Output ---
+# コンパイル後のファイルや配布用フォルダ
+dist/
+build/
+out/
+
+# --- Operating System ---
+# WindowsやMacが自動作成する隠しファイル
+.DS_Store
+Thumbs.db
+
+# --- Hardware / Logs ---
+# ログファイル
+*.log
