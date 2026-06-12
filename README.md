@@ -21,26 +21,33 @@ Cozmo_Effect_Project_26 - 名古屋工学院専門学校 - CT3B - 7班卒業研�
 ## 3. ディレクトリ構成(適宜更新)
 ```text
 ├── algorithm/           # 群知能・フェロモン計算ロジック
+    ├── mapping/                # マッピング系
+        ├── .gitkeep
+    ├── virtual_pheromones/     # 仮想フェロモンのプログラム系
+        ├── pheromone_log_save.py       # 解説記入中
+        ├── pheromone_navigation.py     # 解説記入中
 ├── camera/              # カメラ制御・認識
+    ├── aruco_tracker_image/    # 検知するarucoマーカー画像を保存する場所
+        ├── # 記述略
+    ├── tool/           # 本研究には直接影響しないツール群
+        ├── generate_marker.py  # arucoマーカーを生成するプログラム
     ├── camera_movie.py         # Cozmoのカメラ映像を表示するモジュール
+    ├── aruco_tracker.py        # arucoマーカーを検知するモジュール
 ├── docs/                # 設計書など
-├── facial_expression/   # 表情管理関連
-    ├── face.py                 # 表情管理のプログラム
+    ├── # 記述略
+├── performance/        # 本研究には直接影響しないが、パフォーマンス面で利用するプログラム群
+    ├── facial_expression.py    # Cozmoの表情を管理するモジュール
 ├── hardware/            # Cozmo制御系
     ├── step_detection.py       # 段差検知するモジュール（現在使われていないファイル）
-    ├── perfect_path.py         # ズレを最小限に旋回するモジュール（現在使われていないファイル）
-    ├── map.py                  # テーブルのサイズを計測するモジュール（現在使われていないファイル）
-    ├── shortest_path.py        # ゴール地点の指定と最短距離の割り出しモジュール（現在使われていないファイル）
-    ├── collision_prevention.py # 障害物検知のモジュール（現在使われていないファイル）
     ├── buttery.py              # Cozmoのバッテリー残量を表示するモジュール
-    ├── scenarios/              # 記入中（現在使われていないファイル）
-        ├── test_scenario.py    # 記入中（現在使われていないファイル）
-├── telecommunication/   # 通信制御系
+    ├── perfect_turnning.py     # ズレを最小限にした旋回モジュール（現在使われていないファイル）
+├── connect/             # Cozmoへ接続する際のプログラム群
     ├── network_check.py        # 接続中のWifiを切断してCozmoへ繋げるモジュール
+├── telecommunication/   # 通信制御系
+    ├── test_scenario.py        # 記入中（現在使われていないファイル）
     ├── pc_communication.py     # Cozmo同士で通信するためのモジュール（現在使われていないファイル）
     ├── coordinate_sender.py    # Cozmo同士での通信において、座標情報を随時通信するモジュール（現在使われていないファイル）
 ├── main.py              # Cozmoを実際に動作させるためのプログラムファイル
-├── main_dev.py          # Cozmoを実際に動作させるためのプログラムファイル（将来的にmain.pyへ置き換え）
 └── README.md            # このファイル
 ```
 
@@ -52,4 +59,4 @@ Cozmo_Effect_Project_26 - 名古屋工学院専門学校 - CT3B - 7班卒業研�
 * **8月:** プロトタイプに発生中のバグ修正とステージの作成。また、発表へ向けたドキュメント作成。
 
 ---
-最終更新：2026/6/11 - 7班卒業研究
+最終更新：2026/6/12 - 7班卒業研究
