@@ -41,6 +41,8 @@ Cozmo_Effect_Project_26 - 名古屋工学院専門学校 - CT3B - 7班卒業研�
     ├── step_detection.py       # 段差検知するモジュール（現在使われていないファイル）
     ├── buttery.py              # Cozmoのバッテリー残量を表示するモジュール
     ├── perfect_turnning.py     # ズレを最小限にした旋回モジュール（現在使われていないファイル）
+    ├── judenki.py              # 充電器にCozmoが自律して戻るモジュール
+    ├── best.pt                 # judenki.pyで利用される学習データ
 ├── connect/             # Cozmoへ接続する際のプログラム群
     ├── network_check.py        # 接続中のWifiを切断してCozmoへ繋げるモジュール
 ├── telecommunication/   # 通信制御系
