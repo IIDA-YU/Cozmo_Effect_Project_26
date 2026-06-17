@@ -34,8 +34,10 @@ Cozmo_Effect_Project_26 - 名古屋工学院専門学校 - CT3B - 7班卒業研�
         ├── generate_marker.py  # arucoマーカーを生成するプログラム
     ├── learning_data/  # 画像学習したデータを格納するファイル
         ├── # 記述略
-    ├── camera_movie.py         # Cozmoのカメラ映像を表示するモジュール
-    ├── aruco_tracker.py        # arucoマーカーを検知するモジュール
+    ├── camera_movie.py                 # Cozmoのカメラ映像を表示するモジュール
+    ├── aruco_tracker.py                # arucoマーカーを検知するモジュール
+    ├── judenki.py                      # Cozmoが自律して充電器台まで回帰するモジュール
+    ├── collosion_prevention_marker.py  # キューブを障害物判定して回避するモジュール
 ├── docs/                # 設計書など
     ├── # 記述略
 ├── performance/        # 本研究には直接影響しないが、パフォーマンス面で利用するプログラム群
