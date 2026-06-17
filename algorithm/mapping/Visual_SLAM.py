@@ -1,5 +1,4 @@
 import pycozmo
-import cv2
 import numpy as np
 from inference import get_model
 import time
