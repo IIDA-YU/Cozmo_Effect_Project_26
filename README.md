@@ -22,6 +22,7 @@ Cozmo_Effect_Project_26 - 名古屋工学院専門学校 - CT3B - 7班卒業研�
 ```text
 ├── algorithm/           # 群知能・フェロモン計算ロジック
     ├── mapping/                # マッピング系
+        ├── visual_slam.py      # 固定したキューブからCozmoの現在地補正を行うモジュール
         ├── .gitkeep
     ├── virtual_pheromones/     # 仮想フェロモンのプログラム系
         ├── pheromone_log_save.py       # 解説記入中
@@ -31,8 +32,12 @@ Cozmo_Effect_Project_26 - 名古屋工学院専門学校 - CT3B - 7班卒業研�
         ├── # 記述略
     ├── tool/           # 本研究には直接影響しないツール群
         ├── generate_marker.py  # arucoマーカーを生成するプログラム
-    ├── camera_movie.py         # Cozmoのカメラ映像を表示するモジュール
-    ├── aruco_tracker.py        # arucoマーカーを検知するモジュール
+    ├── learning_data/  # 画像学習したデータを格納するファイル
+        ├── # 記述略
+    ├── camera_movie.py                 # Cozmoのカメラ映像を表示するモジュール
+    ├── aruco_tracker.py                # arucoマーカーを検知するモジュール
+    ├── judenki.py                      # Cozmoが自律して充電器台まで回帰するモジュール
+    ├── collosion_prevention_marker.py  # キューブを障害物判定して回避するモジュール
 ├── docs/                # 設計書など
     ├── # 記述略
 ├── performance/        # 本研究には直接影響しないが、パフォーマンス面で利用するプログラム群
@@ -41,6 +46,8 @@ Cozmo_Effect_Project_26 - 名古屋工学院専門学校 - CT3B - 7班卒業研�
     ├── step_detection.py       # 段差検知するモジュール（現在使われていないファイル）
     ├── buttery.py              # Cozmoのバッテリー残量を表示するモジュール
     ├── perfect_turnning.py     # ズレを最小限にした旋回モジュール（現在使われていないファイル）
+    ├── judenki.py              # 充電器にCozmoが自律して戻るモジュール
+    ├── best.pt                 # judenki.pyで利用される学習データ
 ├── connect/             # Cozmoへ接続する際のプログラム群
     ├── network_check.py        # 接続中のWifiを切断してCozmoへ繋げるモジュール
 ├── telecommunication/   # 通信制御系

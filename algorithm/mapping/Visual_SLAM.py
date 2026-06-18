@@ -1,5 +1,4 @@
 import pycozmo
-import cv2
 import numpy as np
 from ultralytics import YOLO # 💡変更: inferenceではなくYOLOを使用
 import time
