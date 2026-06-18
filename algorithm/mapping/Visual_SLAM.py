@@ -1,15 +1,13 @@
 import pycozmo
 import cv2
 import numpy as np
-from inference import get_model
+from ultralytics import YOLO # 💡変更: inferenceではなくYOLOを使用
 import time
 import math
 
-API_KEY = "3G6BKq9aoWXFjR59imrw"
-MODEL_ID = "powercube/2"
-
-print("ローカルAIモデルを準備中...")
-model = get_model(model_id=MODEL_ID, api_key=API_KEY)
+# 💡変更: APIキーとMODEL_IDを削除し、直接ローカルファイルを指定
+print("ローカルAIモデル(best.pt)を準備中...")
+model = YOLO("best.pt") 
 
 # --- 教室デスク用最適化パラメータ ---
 REAL_MARKER_WIDTH_MM = 25.0  
@@ -134,10 +132,8 @@ def main():
         print(f"🔄 初期スキャンを開始します（{EXPECTED_CUBES}つのキューブを探します）")
         scan_start_time = time.time()
         
-        # 💡 ループクロージャのフラグを追加
         loop_closed = False
         
-        # 💡 スキャン時間を60秒に延長し、ループクロージャが完了するまで回り続ける
         while time.time() - scan_start_time < 60.0 and not loop_closed:
             current_time = time.time()
             if current_time - last_head_cmd_time > 1.5:
@@ -152,25 +148,28 @@ def main():
                 update_fov_map(est_x, est_y, est_theta)
                 
                 try:
-                    results = model.infer(latest_image)
-                    predictions = results[0].predictions if isinstance(results, list) else results.predictions
+                    # 💡変更: Ultralytics式の推論とデータ抽出（初期スキャン）
+                    results = model(latest_image, verbose=False)
+                    boxes = results[0].boxes
                     
                     best_pred = None
                     min_pixel_offset = 9999
                     
-                    for pred in predictions:
-                        cx, cy, w, h = int(pred.x), int(pred.y), int(pred.width), int(pred.height)
-                        if float(pred.confidence) < 0.75 or h == 0 or (w/h) < 0.85 or (w/h) > 1.15: 
+                    for box in boxes:
+                        cx, cy, w, h = map(int, box.xywh[0].tolist())
+                        conf = float(box.conf[0])
+                        
+                        if conf < 0.75 or h == 0 or (w/h) < 0.85 or (w/h) > 1.15: 
                             continue
                         
                         pixel_offset = cx - (latest_image.shape[1] / 2)
                         if abs(pixel_offset) < min_pixel_offset:
                             min_pixel_offset = abs(pixel_offset)
-                            best_pred = pred
+                            best_pred = {"x": cx, "y": cy, "width": w, "height": h}
 
                     if best_pred is not None:
-                        cx = int(best_pred.x)
-                        w = int(best_pred.width)
+                        cx = best_pred["x"]
+                        w = best_pred["width"]
                         pixel_offset = cx - (latest_image.shape[1] / 2)
                         
                         if abs(pixel_offset) <= 50: 
@@ -185,21 +184,17 @@ def main():
                                     matched_id = l_id; break
                             
                             if matched_id is None:
-                                # 新規キューブの登録
                                 if len(true_landmarks) < EXPECTED_CUBES:
                                     true_landmarks[landmark_id_counter] = (observed_x, observed_y)
                                     persistent_mapped_cubes.append((observed_x, observed_y))
                                     print(f"📌 初期スキャンで捕捉！ 確定ランドマーク [{landmark_id_counter}]: 距離 {distance:.0f}mm")
                                     landmark_id_counter += 1
                             else:
-                                # 💡 【ループクロージャのコア処理】
-                                # すべてのキューブを見つけた後、さらに回って「0番」に再遭遇した瞬間！
                                 if len(true_landmarks) == EXPECTED_CUBES and matched_id == 0:
                                     drift_x = observed_x - true_landmarks[0][0]
                                     drift_y = observed_y - true_landmarks[0][1]
                                     print(f"🎉 ループクロージャ発動！ 蓄積誤差(X:{drift_x:.0f}mm, Y:{drift_y:.0f}mm)を空間補正します！")
                                     
-                                    # 誤差を各キューブに分配して、歪んだ空間を長方形にスナップ！
                                     for i in range(1, EXPECTED_CUBES):
                                         factor = i / EXPECTED_CUBES
                                         old_x, old_y = true_landmarks[i]
@@ -209,8 +204,9 @@ def main():
                                     for pt in true_landmarks.values():
                                         persistent_mapped_cubes.append(pt)
                                     
-                                    loop_closed = True # スピン完了フラグ
-                except: pass
+                                    loop_closed = True 
+                except Exception as e:
+                    pass
                 
                 map_img = draw_memory_map(est_x, est_y, est_theta)
                 cv2.imshow("Cozmo SLAM Map", map_img)
@@ -236,15 +232,18 @@ def main():
                 correction_triggered = False
                 
                 try:
-                    results = model.infer(display_img)
-                    predictions = results[0].predictions if isinstance(results, list) else results.predictions
+                    # 💡変更: Ultralytics式の推論とデータ抽出（ナビゲーション）
+                    results = model(display_img, verbose=False)
+                    boxes = results[0].boxes
                     
                     best_pred = None
                     min_pixel_offset = 9999
                     
-                    for pred in predictions:
-                        cx, cy, w, h = int(pred.x), int(pred.y), int(pred.width), int(pred.height)
-                        if float(pred.confidence) < 0.75 or h == 0 or (w/h) < 0.85 or (w/h) > 1.15: 
+                    for box in boxes:
+                        cx, cy, w, h = map(int, box.xywh[0].tolist())
+                        conf = float(box.conf[0])
+                        
+                        if conf < 0.75 or h == 0 or (w/h) < 0.85 or (w/h) > 1.15: 
                             continue
                         
                         cv2.rectangle(display_img, (int(cx-w/2), int(cy-h/2)), (int(cx+w/2), int(cy+h/2)), (0, 255, 0), 2)
@@ -252,11 +251,11 @@ def main():
                         pixel_offset = cx - (display_img.shape[1] / 2)
                         if abs(pixel_offset) < min_pixel_offset:
                             min_pixel_offset = abs(pixel_offset)
-                            best_pred = pred
+                            best_pred = {"x": cx, "y": cy, "width": w, "height": h}
 
                     if best_pred is not None:
-                        cx = int(best_pred.x)
-                        w = int(best_pred.width)
+                        cx = best_pred["x"]
+                        w = best_pred["width"]
                         pixel_offset = cx - (display_img.shape[1] / 2)
                         
                         if abs(pixel_offset) <= 80: 
@@ -296,7 +295,8 @@ def main():
                                     persistent_mapped_cubes.append((observed_x, observed_y))
                                     print(f"🌟 新規キューブを移動中に発見・追加！ [{landmark_id_counter}]")
                                     landmark_id_counter += 1
-                except: pass
+                except Exception as e:
+                    pass
 
                 out_of_bounds = False
                 if len(true_landmarks) >= 3:
