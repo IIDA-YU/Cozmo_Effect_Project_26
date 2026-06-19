@@ -1,3 +1,6 @@
+import os
+os.environ["YOLO_OFFLINE"] = "True"  # 💡完全オフライン動作の強制（必ず一番上に書く）
+
 import pycozmo
 import cv2
 import numpy as np
@@ -5,8 +8,9 @@ from ultralytics import YOLO
 import time
 import math
 
-print("ローカルAIモデル(best.pt)を準備中...")
-model = YOLO("best.pt") 
+print("ローカルAIモデル(best_powercube.pt)を準備中...")
+# 💡変更: learning_dataフォルダの中にあるモデルを指定
+model = YOLO("learning_data/best_powercube.pt") 
 
 # --- 教室デスク用最適化パラメータ ---
 REAL_MARKER_WIDTH_MM = 25.0  
@@ -176,7 +180,6 @@ def main():
                         conf = float(box.conf[0])
                         track_id = int(box.id[0]) if box.id is not None else -1
                         
-                        # 💡改善1: 自信度を0.75→0.55に緩和。長方形の許容度を0.70〜1.30に緩和（斜め対応）
                         if conf < 0.55 or h == 0 or (w/h) < 0.70 or (w/h) > 1.30: 
                             continue
                         
@@ -191,7 +194,6 @@ def main():
                         t_id = best_pred["id"]
                         pixel_offset = cx - (latest_image.shape[1] / 2)
                         
-                        # 💡改善2: 画面の端っこ（中心から120px）まで読み取りを許可
                         if abs(pixel_offset) <= 120: 
                             raw_distance = (REAL_MARKER_WIDTH_MM * FOCAL_LENGTH) / w
                             
@@ -284,7 +286,6 @@ def main():
                         conf = float(box.conf[0])
                         track_id = int(box.id[0]) if box.id is not None else -1
                         
-                        # 💡改善1: 自信度を0.75→0.55に緩和。長方形の許容度を0.70〜1.30に緩和（斜め対応）
                         if conf < 0.55 or h == 0 or (w/h) < 0.70 or (w/h) > 1.30: 
                             continue
                         
@@ -301,7 +302,6 @@ def main():
                         t_id = best_pred["id"]
                         pixel_offset = cx - (display_img.shape[1] / 2)
                         
-                        # 💡改善2: 画面の端っこ（中心から120px）まで補正と新規発見を許可
                         if abs(pixel_offset) <= 120: 
                             raw_distance = (REAL_MARKER_WIDTH_MM * FOCAL_LENGTH) / w
                             
