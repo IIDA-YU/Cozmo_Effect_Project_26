@@ -1,10 +1,10 @@
 import pycozmo
+import cv2
 import numpy as np
-from ultralytics import YOLO # 💡変更: inferenceではなくYOLOを使用
+from ultralytics import YOLO 
 import time
 import math
 
-# 💡変更: APIキーとMODEL_IDを削除し、直接ローカルファイルを指定
 print("ローカルAIモデル(best.pt)を準備中...")
 model = YOLO("best.pt") 
 
@@ -26,9 +26,15 @@ persistent_mapped_cubes = []
 landmark_id_counter = 0
 offset_x, offset_y, offset_theta = 0.0, 0.0, 0.0
 
+current_raw_x, current_raw_y = 0.0, 0.0 
+
 target_x = None
 target_y = None
 latest_image = None
+robot_trajectory = [] 
+
+distance_history = {}
+ALPHA = 0.2 
 
 def on_camera_image(cli, image):
     global latest_image
@@ -48,36 +54,39 @@ def from_map_coords(mx, my):
     return x_mm, y_mm
 
 def mouse_callback(event, x, y, flags, param):
-    global target_x, target_y
+    global target_x, target_y, offset_x, offset_y, current_raw_x, current_raw_y, distance_history
+    
     if event == cv2.EVENT_LBUTTONDOWN:
         tx, ty = from_map_coords(x, y)
         target_x = tx
         target_y = ty
         print(f"🎯 目標地点を設定しました: X:{target_x:.0f}mm, Y:{target_y:.0f}mm")
+        
+    elif event == cv2.EVENT_RBUTTONDOWN:
+        rx, ry = from_map_coords(x, y)
+        offset_x = rx - current_raw_x
+        offset_y = ry - current_raw_y
+        distance_history.clear() 
+        print(f"🚁 誘拐リカバリ！現在地を強制リセットしました")
 
 def draw_memory_map(est_x, est_y, est_theta):
-    global memory_map, target_x, target_y
+    global memory_map, target_x, target_y, robot_trajectory
     map_img = memory_map.copy()
     
+    if len(robot_trajectory) > 1:
+        for i in range(1, len(robot_trajectory)):
+            pt1 = to_map_coords(robot_trajectory[i-1][0], robot_trajectory[i-1][1])
+            pt2 = to_map_coords(robot_trajectory[i][0], robot_trajectory[i][1])
+            cv2.line(map_img, pt1, pt2, (255, 200, 50), 1) 
+            
     for (mx, my) in persistent_mapped_cubes:
         cv2.circle(map_img, to_map_coords(mx, my), int(25 * MAP_SCALE), (0, 0, 255), -1)
     
-    if len(true_landmarks) >= 3:
-        pts = np.array(list(true_landmarks.values()), dtype=np.float32)
-        rect = cv2.minAreaRect(pts)
-        box = cv2.boxPoints(rect)
-        
-        box_pts = []
-        for pt in box:
-            box_pts.append(to_map_coords(pt[0], pt[1]))
-            
-        cv2.polylines(map_img, [np.int32(box_pts)], True, (0, 0, 255), 3)
-            
-    elif len(true_landmarks) == 2:
-        pts = list(true_landmarks.values())
-        p1 = to_map_coords(pts[0][0], pts[0][1])
-        p2 = to_map_coords(pts[1][0], pts[1][1])
-        cv2.line(map_img, p1, p2, (0, 0, 255), 3)
+    if len(true_landmarks) >= 2:
+        landmark_pts = []
+        for l_id, (lx, ly) in true_landmarks.items():
+            landmark_pts.append(to_map_coords(lx, ly))
+        cv2.polylines(map_img, [np.int32(landmark_pts)], isClosed=True, color=(0, 255, 0), thickness=2)
             
     if target_x is not None and target_y is not None:
         t_pt = to_map_coords(target_x, target_y)
@@ -103,7 +112,8 @@ def update_fov_map(est_x, est_y, est_theta):
 
 def main():
     global latest_image, memory_map, true_landmarks, landmark_id_counter, persistent_mapped_cubes
-    global offset_x, offset_y, offset_theta, target_x, target_y
+    global offset_x, offset_y, offset_theta, target_x, target_y, robot_trajectory
+    global current_raw_x, current_raw_y, distance_history
     
     cli = pycozmo.Client()
     cli.start()
@@ -127,12 +137,11 @@ def main():
         cli.add_handler(pycozmo.event.EvtNewRawCameraImage, on_camera_image)
         
         last_head_cmd_time = time.time()
-        
         print(f"🔄 初期スキャンを開始します（{EXPECTED_CUBES}つのキューブを探します）")
         scan_start_time = time.time()
-        
         loop_closed = False
         
+        # === 1. 初期スキャンフェーズ ===
         while time.time() - scan_start_time < 60.0 and not loop_closed:
             current_time = time.time()
             if current_time - last_head_cmd_time > 1.5:
@@ -142,13 +151,21 @@ def main():
             cli.drive_wheels(-12.0, 12.0) 
             
             if latest_image is not None and cli.pose is not None:
-                raw_x, raw_y, raw_theta = cli.pose.position.x, cli.pose.position.y, cli.pose.rotation.angle_z.radians
-                est_x, est_y, est_theta = raw_x + offset_x, raw_y + offset_y, raw_theta + offset_theta
+                current_raw_x = cli.pose.position.x
+                current_raw_y = cli.pose.position.y
+                raw_theta = cli.pose.rotation.angle_z.radians
+                
+                est_x = current_raw_x + offset_x
+                est_y = current_raw_y + offset_y
+                est_theta = raw_theta + offset_theta
+                
+                robot_trajectory.append((est_x, est_y))
+                if len(robot_trajectory) > 2000: robot_trajectory.pop(0)
+                    
                 update_fov_map(est_x, est_y, est_theta)
                 
                 try:
-                    # 💡変更: Ultralytics式の推論とデータ抽出（初期スキャン）
-                    results = model(latest_image, verbose=False)
+                    results = model.track(latest_image, persist=True, tracker="botsort.yaml", verbose=False)
                     boxes = results[0].boxes
                     
                     best_pred = None
@@ -157,22 +174,36 @@ def main():
                     for box in boxes:
                         cx, cy, w, h = map(int, box.xywh[0].tolist())
                         conf = float(box.conf[0])
+                        track_id = int(box.id[0]) if box.id is not None else -1
                         
-                        if conf < 0.75 or h == 0 or (w/h) < 0.85 or (w/h) > 1.15: 
+                        # 💡改善1: 自信度を0.75→0.55に緩和。長方形の許容度を0.70〜1.30に緩和（斜め対応）
+                        if conf < 0.55 or h == 0 or (w/h) < 0.70 or (w/h) > 1.30: 
                             continue
                         
                         pixel_offset = cx - (latest_image.shape[1] / 2)
                         if abs(pixel_offset) < min_pixel_offset:
                             min_pixel_offset = abs(pixel_offset)
-                            best_pred = {"x": cx, "y": cy, "width": w, "height": h}
+                            best_pred = {"x": cx, "y": cy, "width": w, "height": h, "id": track_id}
 
                     if best_pred is not None:
                         cx = best_pred["x"]
                         w = best_pred["width"]
+                        t_id = best_pred["id"]
                         pixel_offset = cx - (latest_image.shape[1] / 2)
                         
-                        if abs(pixel_offset) <= 50: 
-                            distance = (REAL_MARKER_WIDTH_MM * FOCAL_LENGTH) / w
+                        # 💡改善2: 画面の端っこ（中心から120px）まで読み取りを許可
+                        if abs(pixel_offset) <= 120: 
+                            raw_distance = (REAL_MARKER_WIDTH_MM * FOCAL_LENGTH) / w
+                            
+                            if t_id != -1:
+                                if t_id not in distance_history:
+                                    distance_history[t_id] = raw_distance
+                                else:
+                                    distance_history[t_id] = (ALPHA * raw_distance) + ((1 - ALPHA) * distance_history[t_id])
+                                distance = distance_history[t_id]
+                            else:
+                                distance = raw_distance
+
                             angle_offset = (pixel_offset / (latest_image.shape[1] / 2)) * (FOV_H_RADIANS / 2)
                             observed_x = est_x + distance * math.cos(est_theta - angle_offset)
                             observed_y = est_y + distance * math.sin(est_theta - angle_offset)
@@ -192,7 +223,10 @@ def main():
                                 if len(true_landmarks) == EXPECTED_CUBES and matched_id == 0:
                                     drift_x = observed_x - true_landmarks[0][0]
                                     drift_y = observed_y - true_landmarks[0][1]
-                                    print(f"🎉 ループクロージャ発動！ 蓄積誤差(X:{drift_x:.0f}mm, Y:{drift_y:.0f}mm)を空間補正します！")
+                                    print(f"🎉 ループクロージャ発動！ 空間補正します！")
+                                    
+                                    drift_x = max(min(drift_x, 100.0), -100.0)
+                                    drift_y = max(min(drift_y, 100.0), -100.0)
                                     
                                     for i in range(1, EXPECTED_CUBES):
                                         factor = i / EXPECTED_CUBES
@@ -215,7 +249,7 @@ def main():
         print(f"✅ スキャン完了！（クリック待ちです）")
         cli.drive_wheels(0.0, 0.0) 
         
-        # --- 2. ナビゲーションループフェーズ ---
+        # === 2. ナビゲーションフェーズ ===
         while True:
             current_time = time.time()
             if current_time - last_head_cmd_time > 1.5:
@@ -224,15 +258,22 @@ def main():
             
             if latest_image is not None and cli.pose is not None:
                 display_img = latest_image.copy()
-                raw_x, raw_y, raw_theta = cli.pose.position.x, cli.pose.position.y, cli.pose.rotation.angle_z.radians
-                est_x, est_y, est_theta = raw_x + offset_x, raw_y + offset_y, raw_theta + offset_theta
+                current_raw_x = cli.pose.position.x
+                current_raw_y = cli.pose.position.y
+                raw_theta = cli.pose.rotation.angle_z.radians
                 
+                est_x = current_raw_x + offset_x
+                est_y = current_raw_y + offset_y
+                est_theta = raw_theta + offset_theta
+                
+                robot_trajectory.append((est_x, est_y))
+                if len(robot_trajectory) > 2000: robot_trajectory.pop(0)
+                    
                 update_fov_map(est_x, est_y, est_theta)
                 correction_triggered = False
                 
                 try:
-                    # 💡変更: Ultralytics式の推論とデータ抽出（ナビゲーション）
-                    results = model(display_img, verbose=False)
+                    results = model.track(display_img, persist=True, tracker="botsort.yaml", verbose=False)
                     boxes = results[0].boxes
                     
                     best_pred = None
@@ -241,8 +282,10 @@ def main():
                     for box in boxes:
                         cx, cy, w, h = map(int, box.xywh[0].tolist())
                         conf = float(box.conf[0])
+                        track_id = int(box.id[0]) if box.id is not None else -1
                         
-                        if conf < 0.75 or h == 0 or (w/h) < 0.85 or (w/h) > 1.15: 
+                        # 💡改善1: 自信度を0.75→0.55に緩和。長方形の許容度を0.70〜1.30に緩和（斜め対応）
+                        if conf < 0.55 or h == 0 or (w/h) < 0.70 or (w/h) > 1.30: 
                             continue
                         
                         cv2.rectangle(display_img, (int(cx-w/2), int(cy-h/2)), (int(cx+w/2), int(cy+h/2)), (0, 255, 0), 2)
@@ -250,15 +293,27 @@ def main():
                         pixel_offset = cx - (display_img.shape[1] / 2)
                         if abs(pixel_offset) < min_pixel_offset:
                             min_pixel_offset = abs(pixel_offset)
-                            best_pred = {"x": cx, "y": cy, "width": w, "height": h}
+                            best_pred = {"x": cx, "y": cy, "width": w, "height": h, "id": track_id}
 
                     if best_pred is not None:
                         cx = best_pred["x"]
                         w = best_pred["width"]
+                        t_id = best_pred["id"]
                         pixel_offset = cx - (display_img.shape[1] / 2)
                         
-                        if abs(pixel_offset) <= 80: 
-                            distance = (REAL_MARKER_WIDTH_MM * FOCAL_LENGTH) / w
+                        # 💡改善2: 画面の端っこ（中心から120px）まで補正と新規発見を許可
+                        if abs(pixel_offset) <= 120: 
+                            raw_distance = (REAL_MARKER_WIDTH_MM * FOCAL_LENGTH) / w
+                            
+                            if t_id != -1:
+                                if t_id not in distance_history:
+                                    distance_history[t_id] = raw_distance
+                                else:
+                                    distance_history[t_id] = (ALPHA * raw_distance) + ((1 - ALPHA) * distance_history[t_id])
+                                distance = distance_history[t_id]
+                            else:
+                                distance = raw_distance
+
                             angle_offset = (pixel_offset / (display_img.shape[1] / 2)) * (FOV_H_RADIANS / 2)
                             observed_x = est_x + distance * math.cos(est_theta - angle_offset)
                             observed_y = est_y + distance * math.sin(est_theta - angle_offset)
@@ -271,25 +326,26 @@ def main():
                             
                             if matched_id is not None:
                                 tx, ty = true_landmarks[matched_id]
-                                
                                 angle_to_cube = math.atan2(ty - est_y, tx - est_x)
                                 heading_error = angle_to_cube - (est_theta - angle_offset)
                                 heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
                                 
-                                if abs(heading_error) < 0.8:
-                                    offset_theta += heading_error * 0.15
+                                if abs(heading_error) < 0.5:
+                                    offset_theta += heading_error * 0.05
                                     new_est_theta = raw_theta + offset_theta
-                                    
                                     correct_rob_x = tx - distance * math.cos(new_est_theta - angle_offset)
                                     correct_rob_y = ty - distance * math.sin(new_est_theta - angle_offset)
                                     
-                                    offset_x += (correct_rob_x - est_x) * 0.15
-                                    offset_y += (correct_rob_y - est_y) * 0.15
+                                    err_x = correct_rob_x - est_x
+                                    err_y = correct_rob_y - est_y
                                     
-                                    correction_triggered = True
+                                    if math.hypot(err_x, err_y) < 100.0:
+                                        offset_x += err_x * 0.05
+                                        offset_y += err_y * 0.05
+                                        correction_triggered = True
                                     
                             else:
-                                if abs(pixel_offset) < 50 and len(true_landmarks) < EXPECTED_CUBES:
+                                if len(true_landmarks) < EXPECTED_CUBES:
                                     true_landmarks[landmark_id_counter] = (observed_x, observed_y)
                                     persistent_mapped_cubes.append((observed_x, observed_y))
                                     print(f"🌟 新規キューブを移動中に発見・追加！ [{landmark_id_counter}]")
@@ -302,11 +358,8 @@ def main():
                     pts = np.array(list(true_landmarks.values()), dtype=np.float32)
                     rect = cv2.minAreaRect(pts)
                     box = cv2.boxPoints(rect)
-                    
                     dist = cv2.pointPolygonTest(np.float32(box), (float(est_x), float(est_y)), True)
-                    
-                    if dist < 30.0:
-                        out_of_bounds = True
+                    if dist < 20.0: out_of_bounds = True
 
                 if out_of_bounds:
                     cv2.putText(display_img, "VIRTUAL FENCE! ESCAPE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
@@ -316,7 +369,7 @@ def main():
                     time.sleep(0.8)
                     target_x, target_y = None, None 
                 
-                elif any(math.hypot(est_x - tx, est_y - ty) < 140.0 for tx, ty in true_landmarks.values()):
+                elif any(math.hypot(est_x - tx, est_y - ty) < 100.0 for tx, ty in true_landmarks.values()):
                     cv2.putText(display_img, "WALL BLOCK! STOP", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                     cli.drive_wheels(-15.0, -15.0)
                     time.sleep(0.4)
@@ -328,7 +381,7 @@ def main():
                     angle_diff = angle_to_target - est_theta
                     angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
                     
-                    if dist_to_target < 30.0:
+                    if dist_to_target < 15.0:
                         print("🎯 目標地点に到着しました！")
                         target_x, target_y = None, None
                         cli.drive_wheels(0.0, 0.0)
@@ -350,7 +403,15 @@ def main():
                 map_img = draw_memory_map(est_x, est_y, est_theta)
                 cv2.imshow("Cozmo SLAM Map", map_img)
                 
-                if cv2.waitKey(1) & 0xFF == ord('q'): break
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'): break
+                elif key == ord('a'): 
+                    offset_theta -= 0.2
+                    print("🔄 コンパスを左に修正しました")
+                elif key == ord('d'): 
+                    offset_theta += 0.2
+                    print("🔄 コンパスを右に修正しました")
+
             time.sleep(0.05)
             
     finally:
