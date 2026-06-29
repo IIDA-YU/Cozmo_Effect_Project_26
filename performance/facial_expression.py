@@ -18,8 +18,12 @@ class FaceManager:
         while not self.stop_flag:
             if self.current_frame is not None:
                 try:
-                    # 非常に短い間隔で送信し、デフォルトの目が割り込む隙を与えない
-                    self.cli.display_image(self.current_frame)
+                    # ★重要：システム共通ロックを取得している間だけ画像データを流す（衝突を100%遮断する）
+                    if hasattr(self.cli, "conn_lock"):
+                        with self.cli.conn_lock:
+                            self.cli.display_image(self.current_frame)
+                    else:
+                        self.cli.display_image(self.current_frame)
                 except Exception:
                     pass
             time.sleep(0.03) # 約30FPSで更新
@@ -56,7 +60,6 @@ class FaceManager:
         """画像送信スレッドを停止し、Cozmoのデフォルトの表情に戻します"""
         self.stop_flag = True
         if self.stream_thread is not None:
-            # スレッドが安全に終了するのを少しだけ待つ
             self.stream_thread.join(timeout=0.2)
             self.stream_thread = None
         self.current_frame = None
