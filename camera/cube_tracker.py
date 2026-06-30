@@ -4,7 +4,7 @@ import pycozmo
 
 KNOWN_CUBE_WIDTH_MM = 30.0  
 FOCAL_LENGTH_PIX = 235.0    
-AVOID_DISTANCE_THRESHOLD_MM = 100.0  
+AVOID_DISTANCE_THRESHOLD_MM = 120.0  
 
 class CubeTracker:
     def __init__(self, cli, collision_preventer, camera_viewer=None):
@@ -60,6 +60,9 @@ class CubeTracker:
                                 self.preventer.trigger_obstacle_avoidance("Cube")
                             else:
                                 boxes.append({"box": (int(x1), int(y1), int(x2), int(y2)), "label": f"Cube FAR {int(distance_mm)}mm"})
+
+                            if self.preventer:
+                                self.preventer.trigger_obstacle_avoidance("Cube", distance_mm)
                                 
                     if self.camera_viewer:
                         self.camera_viewer.set_detections("cube", boxes)

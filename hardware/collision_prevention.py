@@ -18,6 +18,10 @@ class CollisionPrevention:
         self.is_avoiding_cliff = False
         self.is_avoiding_collision = False
 
+        # ターゲットごとに検知回数と時間を管理する辞書
+        self.detection_counts = {}
+        self.last_detection_times = {}
+
     def safe_drive_wheels(self, l_speed, r_speed):
         if hasattr(self.cli, "conn_lock"):
             with self.cli.conn_lock:
@@ -51,14 +55,35 @@ class CollisionPrevention:
             time.sleep(turn_time)
         finally:
             self.safe_drive_wheels(0, 0) 
+            time.sleep(1.5)
             self.is_avoiding_cliff = False 
             print("✅ 段差の回避完了。前進を再開します。")
-            time.sleep(0.7)  # 少し待ってから前進再開
+            
 
-    def trigger_obstacle_avoidance(self, target_name):
-        """障害物回避のスイッチを入れる"""
-        if not self.is_avoiding_cliff and not self.is_avoiding_collision:
+    def trigger_obstacle_avoidance(self, target_name, distance=0):
+        """障害物回避のスイッチを入れる（すべての対象物で誤検知防止付き）"""
+        if self.is_avoiding_cliff or self.is_avoiding_collision:
+            return
+
+        current_time = time.time()
+
+        # --- 変更ポイント: 距離に関わらず、見えているならカウントを進める ---
+        last_time = self.last_detection_times.get(target_name, 0)
+        
+        # 前回の検知から1秒以上空いていればカウントをリセット（ノイズ対策）
+        if current_time - last_time > 1.0:
+            self.detection_counts[target_name] = 1
+        else:
+            self.detection_counts[target_name] = self.detection_counts.get(target_name, 0) + 1
+        
+        self.last_detection_times[target_name] = current_time
+
+        print(f"👀 {target_name}を検知中... 連続 {self.detection_counts[target_name]} 回目 (距離: {distance:.1f} mm)")
+
+        # --- 変更ポイント: カウントが3以上溜まっていて、かつ120mm以内に入ったら回避 ---
+        if self.detection_counts[target_name] >= 3 and distance <= 120:
             self.is_avoiding_collision = True
+            self.detection_counts[target_name] = 0  # 発動したらカウントをリセット
             threading.Thread(target=self._obstacle_routine, args=(target_name,), daemon=True).start()
 
     def _obstacle_routine(self, target_name):
@@ -94,7 +119,8 @@ class CollisionPrevention:
             if self.face_manager:
                 self.face_manager.show_default_face()
 
-                time.sleep(0.7)
+            # 回避行動をした後に1秒止まる
+            time.sleep(1.5)
 
             self.is_avoiding_collision = False
             print(f"✅ {target_name}の回避完了。前進を再開します。")

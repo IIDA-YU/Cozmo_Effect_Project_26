@@ -70,7 +70,10 @@ class CozmoTracker:
                                             self.preventer.trigger_obstacle_avoidance("Cozmo")
                                     else:
                                         boxes.append({"box": (int(x1), int(y1), int(x2), int(y2)), "label": f"Cozmo {int(distance_mm)}mm"})
-                                        
+
+                                    if self.preventer:
+                                        self.preventer.trigger_obstacle_avoidance("Cozmo", distance_mm)
+                                                                                
                             if self.camera_viewer:
                                 self.camera_viewer.set_detections("cozmo", boxes)
                         except Exception: 
