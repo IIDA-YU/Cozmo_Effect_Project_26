@@ -6,7 +6,7 @@ from camera.camera_movie import CameraViewer
 
 # ===== 設定（自分の環境に合わせて書き換えてください）=====
 COZMO_SSID = "Cozmo_613F59"   # 自分のCozmoのSSID
-RETURN_SSID = "R0347"         # 終了後に戻したい教室などのWi-Fi
+RETURN_SSID = "ctc-a-171bde"         # 終了後に戻したい教室などのWi-Fi
 
 
 def main():
