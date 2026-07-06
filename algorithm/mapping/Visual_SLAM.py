@@ -84,7 +84,9 @@ class CozmoSlamController:
             landmark_pts = []
             for l_id, (lx, ly) in self.true_landmarks.items():
                 landmark_pts.append(self.to_map_coords(lx, ly))
-            cv2.polylines(map_img, [np.int32(landmark_pts)], isClosed=True, color=(0, 255, 0), thickness=2)
+            # 点群を囲む多角形を描画（緑の枠線）
+            hull = cv2.convexHull(np.array(landmark_pts, dtype=np.int32))
+            cv2.polylines(map_img, [hull], isClosed=True, color=(0, 255, 0), thickness=2)
                 
         if self.target_x is not None and self.target_y is not None:
             t_pt = self.to_map_coords(self.target_x, self.target_y)
@@ -108,7 +110,6 @@ class CozmoSlamController:
         cv2.fillPoly(self.memory_map, np.array([[rob_pt, l_pt, r_pt]], dtype=np.int32), (255, 255, 255))
 
     def get_map_data(self):
-        """マッピングされた情報を辞書形式で返す"""
         return {
             "landmarks": self.true_landmarks,
             "trajectory": self.robot_trajectory,
@@ -116,7 +117,6 @@ class CozmoSlamController:
         }
 
     def save_map_data(self, json_filename="slam_data.json", img_filename="slam_map.png"):
-        """マッピングされた情報をファイルに保存する"""
         data = self.get_map_data()
         with open(json_filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
@@ -151,13 +151,14 @@ class CozmoSlamController:
             loop_closed = False
             
             # === 1. 初期スキャンフェーズ ===
-            while time.time() - scan_start_time < 60.0 and not loop_closed:
+            while time.time() - scan_start_time < 75.0 and not loop_closed: 
                 current_time = time.time()
                 if current_time - last_head_cmd_time > 1.5:
                     cli.set_head_angle(self.TARGET_HEAD_ANGLE)
                     last_head_cmd_time = current_time
                 
-                cli.drive_wheels(-12.0, 12.0) 
+                # スリップ軽減のため、スキャン時の旋回スピードは控えめを維持
+                cli.drive_wheels(-8.0, 8.0) 
                 
                 if self.latest_image is not None and cli.pose is not None:
                     self.current_raw_x = cli.pose.position.x
@@ -336,14 +337,14 @@ class CozmoSlamController:
                                         print(f"🌟 新規キューブを移動中に発見・追加！ [{self.landmark_id_counter}]")
                                         self.landmark_id_counter += 1
                                 else:
-                                    # SLAM補正処理
                                     tx, ty = self.true_landmarks[matched_id]
                                     angle_to_cube = math.atan2(ty - est_y, tx - est_x)
                                     heading_error = angle_to_cube - (est_theta - angle_offset)
                                     heading_error = (heading_error + math.pi) % (2 * math.pi) - math.pi
-                                    
-                                    if abs(heading_error) < 0.5:
-                                        self.offset_theta += heading_error * 0.05
+
+                                    if abs(heading_error) < 0.3:
+                                        self.offset_theta += heading_error * 0.01 
+                                        
                                         new_est_theta = raw_theta + self.offset_theta
                                         correct_rob_x = tx - distance * math.cos(new_est_theta - angle_offset)
                                         correct_rob_y = ty - distance * math.sin(new_est_theta - angle_offset)
@@ -351,9 +352,9 @@ class CozmoSlamController:
                                         err_x = correct_rob_x - est_x
                                         err_y = correct_rob_y - est_y
                                         
-                                        if math.hypot(err_x, err_y) < 100.0:
-                                            self.offset_x += err_x * 0.05
-                                            self.offset_y += err_y * 0.05
+                                        if math.hypot(err_x, err_y) < 150.0:
+                                            self.offset_x += max(-3.0, min(3.0, err_x * 0.05))
+                                            self.offset_y += max(-3.0, min(3.0, err_y * 0.05))
                                             correction_triggered = True
                     except Exception as e:
                         pass
@@ -361,10 +362,14 @@ class CozmoSlamController:
                     out_of_bounds = False
                     if len(self.true_landmarks) >= 3:
                         pts = np.array(list(self.true_landmarks.values()), dtype=np.float32)
-                        rect = cv2.minAreaRect(pts)
-                        box = cv2.boxPoints(rect)
-                        dist = cv2.pointPolygonTest(np.float32(box), (float(est_x), float(est_y)), True)
-                        if dist < 20.0: out_of_bounds = True
+                        
+                        # 💡修正1: convexHullを使用して緑の枠線と判定エリアをピッタリ一致させる
+                        hull = cv2.convexHull(pts)
+                        dist = cv2.pointPolygonTest(hull, (float(est_x), float(est_y)), True)
+                        
+                        # 💡枠線の内側10mmまで近づいたらアウト
+                        if dist < 10.0: 
+                            out_of_bounds = True
 
                     if out_of_bounds:
                         cv2.putText(display_img, "VIRTUAL FENCE! ESCAPE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
@@ -374,7 +379,8 @@ class CozmoSlamController:
                         time.sleep(0.8)
                         self.target_x, self.target_y = None, None 
                     
-                    elif any(math.hypot(est_x - tx, est_y - ty) < 100.0 for tx, ty in self.true_landmarks.values()):
+                    # 💡障害物（キューブ）への接近判定は60mmを維持
+                    elif any(math.hypot(est_x - tx, est_y - ty) < 60.0 for tx, ty in self.true_landmarks.values()):
                         cv2.putText(display_img, "WALL BLOCK! STOP", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                         cli.drive_wheels(-15.0, -15.0)
                         time.sleep(0.4)
@@ -392,11 +398,15 @@ class CozmoSlamController:
                             cli.drive_wheels(0.0, 0.0)
                         elif abs(angle_diff) > 0.3:
                             cv2.putText(display_img, "ADJUSTING HEADING", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-                            if angle_diff > 0: cli.drive_wheels(-12.0, 12.0)
-                            else: cli.drive_wheels(12.0, -12.0)
+                            
+                            # 💡修正2: 方向修正の旋回速度をアップ
+                            if angle_diff > 0: cli.drive_wheels(-15.0, 15.0)
+                            else: cli.drive_wheels(15.0, -15.0)
                         else:
                             cv2.putText(display_img, "NAVIGATING TO TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                            cli.drive_wheels(15.0, 15.0)
+                            
+                            # 💡修正3: 目標地点への前進速度をアップ
+                            cli.drive_wheels(30.0, 30.0)
                     else:
                         cv2.putText(display_img, "WAITING FOR CLICK...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                         cli.drive_wheels(0.0, 0.0)
