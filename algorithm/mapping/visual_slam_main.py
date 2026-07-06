@@ -1,4 +1,4 @@
-from cozmo_slam import CozmoSlamController
+from visual_slam import CozmoSlamController
 
 def main():
     # 1. クラスのインスタンス化
