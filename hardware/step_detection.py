@@ -1,57 +1,31 @@
 import pycozmo
-import time
 
-# ロボットが移動中かどうかを管理するフラグ
-is_moving = False
+class StepDetector:
+    """段差（崖）センサーだけを監視し、見つけたら回避の専門家に報告するクラス"""
+    def __init__(self, cli, collision_preventer):
+        self.cli = cli
+        self.preventer = collision_preventer
+        self.is_running = False
 
-def on_robot_state(cli, state):
-    """ロボットのセンサー情報が更新されるたびに呼ばれる関数"""
-    global is_moving
+    def on_robot_state(self, cli, pkt=None, *args, **kwargs):
+        if not self.is_running or pkt is None: return
+        
+        if hasattr(pkt, "status"):
+            is_cliff = bool(pkt.status & 0x4000)
+            if is_cliff:
+                # 崖を見つけたら即座に回避モジュールへ報告
+                self.preventer.trigger_cliff_avoidance()
 
-    # 段差（崖）を検知した場合
-    if state.cliff_detected:
-        if is_moving:
-            print("段差を検知しました！緊急停止します。")
-            
-            # 1. 即座にタイヤの回転を止める
-            cli.drive_wheels(0, 0)
-            is_moving = False
-            
-            # 2. 安全確保のため、50mm後退する (引数は 距離, 速度)
-            # 後退させるために距離をマイナスにします
-            print("安全のため後退します。")
-            cli.drive_distance(-50, 50).wait()
-            
-            # 3. アニメーションを再生
-            cli.play_anim("anim_fistbump_fail_01").wait()
+    def start(self):
+        self.is_running = True
+        self.cli.add_handler(pycozmo.protocol_encoder.RobotState, self.on_robot_state)
+        print("🤖 段差検知センサーを起動しました。")
+        
+        
 
-def main():
-    global is_moving
-    
-    with pycozmo.connect() as cli:
-        cli.wait_for_robot()
-        
-        # センサーを床に向けやすくするため頭を下げる
-        cli.set_head_angle(0.0).wait()
-        
-        # イベントハンドラを登録
-        cli.add_handler(pycozmo.event.EvtRobotStateUpdated, on_robot_state)
-        
-        print("前進を開始します...")
-        cli.drive_wheels(40, 40)
-        is_moving = True
-        
+    def stop(self):
+        self.is_running = False
         try:
-            # 走行中はプログラムが終了しないように待機
-            while is_moving:
-                time.sleep(0.1)
-                
-            print("処理を終了しました。")
-            
-        except KeyboardInterrupt:
-            # 強制終了時 (Ctrl+C) は安全のためにタイヤを止める
-            print("\nユーザーにより中断されました。")
-            cli.drive_wheels(0, 0)
-
-if __name__ == '__main__':
-    main()
+            self.cli.del_handler(pycozmo.protocol_encoder.RobotState, self.on_robot_state)
+        except Exception:
+            pass
