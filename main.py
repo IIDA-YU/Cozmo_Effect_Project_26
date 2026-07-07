@@ -9,6 +9,9 @@ from hardware.roaming_controller import RoamingController
 from camera.cozmo_tracker import CozmoTracker
 from camera.cube_tracker import CubeTracker
 
+# algorithm フォルダの virtual_pheromones フォルダにあるファイルからインポート
+from algorithm.virtual_pheromones.pheromone_navi_log import PheromoneTracker
+
 # ★ 追加：座標通信の「送信（口）」と「受信（耳）」の両方をインポート
 from telecommunication.coordinate_sender import CoordinateSender
 from telecommunication.pc_communication import CoordCommunication
@@ -50,6 +53,9 @@ def main():
         cozmo_tracker.start()
         cube_tracker = CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)
         cube_tracker.start()
+
+        # 📌 仮想フェロモントラッカーを初期化
+        #tracker = PheromoneTracker(log_filename="forbidden_zones.json")
 
         # =========================================================
         # ★ 4. P2P 双方向通信システムの起動
