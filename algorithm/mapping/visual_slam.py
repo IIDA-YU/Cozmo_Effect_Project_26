@@ -11,6 +11,9 @@ import json
 
 class CozmoSlamController:
     def __init__(self, model_path="learning_data/best_powercube.pt", use_cached_map=False):
+        if not os.path.isabs(model_path):
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(base_dir, model_path)
         print(f"ローカルAIモデル({model_path})を準備中...")
         self.model = YOLO(model_path) 
         self.use_cached_map = use_cached_map
