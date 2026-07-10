@@ -27,7 +27,7 @@ pycozmo.conn.Connection.send = thread_safe_send
 # =========================================================
 # 📌 ネットワーク・P2P通信設定（★ここを環境に合わせて書き換える）
 # =========================================================
-COZMO_SSID = "Cozmo_42A832"   
+COZMO_SSID = "Cozmo_613F59"   
 RETURN_SSID = "R0347"         
 
 ROBOT_ID = "Cozmo-A"            # 自分の名前（もう1台のPCでは "Cozmo-B" にする）
