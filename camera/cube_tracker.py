@@ -2,7 +2,7 @@ import threading, time, os, cv2, numpy as np
 from ultralytics import YOLO
 import pycozmo
 
-KNOWN_CUBE_WIDTH_MM = 29.0  # ※実際のキューブの大きさに合わせて変更してください（標準は約44mmです）
+KNOWN_CUBE_WIDTH_MM = 30.0  # ※実際のキューブの大きさに合わせて変更してください（標準は約44mmです）
 FOCAL_LENGTH_PIX = 235.0    
 AVOID_DISTANCE_THRESHOLD_MM = 90.0  
 RESIZE_WIDTH = 416
@@ -13,7 +13,7 @@ class CubeTracker:
         self.cli = cli
         self.preventer = collision_preventer
         self.camera_viewer = camera_viewer
-        self.model = YOLO(os.path.join(os.path.dirname(__file__), "..", "hardware", "best.pt"))
+        self.model = YOLO(os.path.join(os.path.dirname(__file__), "..", "algorithm", "mapping", "learning_data", "best_powercube.pt"))
         self._latest_raw_image = None
         self._lock = threading.Lock()
         self.is_running = False
@@ -26,7 +26,7 @@ class CubeTracker:
     def _ai_loop(self):
         frame_skip_counter = 0
         while self.is_running:
-            if self.preventer.is_avoiding_cliff or self.preventer.is_avoiding_collision:
+            if self.preventer.is_avoiding_cliff:
                 time.sleep(0.1)
                 continue
                 
@@ -57,8 +57,8 @@ class CubeTracker:
                     scale_x = orig_w / resize_w
                     scale_y = orig_h / resize_h
 
-                    # 誤検知対策: 確信度(conf)を0.75に上げる
-                    results = self.model(small, conf=0.75, verbose=False)
+                    # 誤検知対策: 確信度(conf)を緩める（より多く検出させる）
+                    results = self.model(small, conf=0.64, verbose=False)
                     boxes = []
                     
                     for r in results:
@@ -67,7 +67,7 @@ class CubeTracker:
                             class_name = self.model.names[int(box.cls[0])]
                             
                             # 名前がキューブ以外なら無視する（YOLOの学習ラベル名に合わせて調整してください）
-                            if class_name.lower() not in ["cube", "mark", "station"]: # ※Cubeやマーカー等、担当のラベルを指定してください
+                            if class_name.lower() not in ["cube", "powercube", "mark", "station"]: # ※Cubeやパワーキューブ、マーカー等を許可
                                 continue
 
                             conf_val = float(box.conf[0])
@@ -93,12 +93,22 @@ class CubeTracker:
                                 
                             # 端っこで見切れているか判定 (端から15ピクセル以内)
                             is_edge = (x1 <= 15) or (x2 >= frame_width - 15)
-                            
+
                             # 誤検知対策: 端っこにいない時だけ、アスペクト比（縦横比）のチェックを行う
                             if not is_edge:
-                                # 正方形に近いものだけ許可 (0.75〜1.3)
-                                if aspect_ratio < 0.75 or aspect_ratio > 1.3: 
-                                    continue
+                                # より緩めに許可 (0.6〜1.8)。斜めや伸びた矩形を許容しやすくする
+                                if aspect_ratio < 0.6 or aspect_ratio > 1.8:
+                                    # ただし以下の緩和条件に合致すれば通す:
+                                    # - 高信頼度 (>=0.75)
+                                    # - 検出領域が十分に大きい（画面幅の15%以上）
+                                    # - あるいは近距離（障害回避閾値の1.2倍以内）
+                                    allow_rotated = (
+                                        (conf_val >= 0.75)
+                                        or (max(w, h) >= orig_w * 0.15)
+                                        or ((KNOWN_CUBE_WIDTH_MM * FOCAL_LENGTH_PIX) / max(w, h) <= AVOID_DISTANCE_THRESHOLD_MM * 1.2)
+                                    )
+                                    if not allow_rotated:
+                                        continue
                                 
                             # 距離計算: 横が見切れていても「高さと幅の大きい方」を使って正確な距離を出す
                             effective_size = max(w, h)
@@ -108,6 +118,13 @@ class CubeTracker:
                                 boxes.append({"box": (int(x1), int(y1), int(x2), int(y2)), "label": f"Cube WARNING {int(distance_mm)}mm"})
                             else:
                                 boxes.append({"box": (int(x1), int(y1), int(x2), int(y2)), "label": f"Cube FAR {int(distance_mm)}mm"})
+
+                            # 軽量ログ: 近距離または高信頼度の検出のみ出力してデバッグを助ける
+                            if conf_val >= 0.9 or distance_mm <= AVOID_DISTANCE_THRESHOLD_MM:
+                                try:
+                                    print(f"[CubeDetect] cls={class_name} conf={conf_val:.2f} dist={distance_mm:.1f} pos={position} edge={is_edge} aspect={aspect_ratio:.2f}")
+                                except Exception:
+                                    pass
 
                             # 距離に関係なく、毎回距離と位置(position)を報告する
                             if self.preventer:

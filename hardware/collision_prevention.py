@@ -93,8 +93,8 @@ class CollisionPrevention:
 
             print(f"👀 {target_name}を継続検知中... 連続 {self.detection_counts[target_name]} 回目 (カメラ距離: {distance:.1f} mm, 機体からの実質距離: {actual_distance:.1f} mm, 位置: {position})")
 
-            # カウントが3以上（最低0.8秒見え続けている）かつ 実質距離がAVOID_DISTANCE_THRESHOLD_MM以内に入ったら回避
-            if self.detection_counts[target_name] >= 3 and actual_distance <= 100.0:  # 100mm以内に入ったら回避
+            # カウントが2以上（最低0.4秒見え続けている）かつ 実質距離がAVOID_DISTANCE_THRESHOLD_MM以内に入ったら回避
+            if self.detection_counts[target_name] >= 2 and actual_distance <= 100.0:  # 100mm以内に入ったら回避
                 self.is_avoiding_collision = True
                 self.detection_counts[target_name] = 0  # 発動したらカウントをリセット
                 threading.Thread(target=self._obstacle_routine, args=(target_name, position), daemon=True).start()

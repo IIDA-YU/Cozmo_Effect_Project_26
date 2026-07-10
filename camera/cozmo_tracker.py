@@ -7,8 +7,9 @@ from ultralytics import YOLO
 import pycozmo
 
 # 📌 距離計算パラメータ（Cozmo用）
-KNOWN_COZMO_WIDTH_MM = 94.0  # Cozmoの実際の正面幅(mm) ※実測に合わせて微調整可能
-FOCAL_LENGTH_PIX = 235.0     # Cozmoカメラの焦点距離
+KNOWN_COZMO_WIDTH_MM = 100.0   # Cozmoの実際の正面横幅(mm) ※実測に合わせて微調整可能
+KNOWN_COZMO_HEIGHT_MM = 70.0  # Cozmoの実際の正面高さ(mm) ※実測に合わせて微調整可能
+FOCAL_LENGTH_PIX = 235.0      # Cozmoカメラの焦点距離
 AVOID_DISTANCE_THRESHOLD_MM = 90.0  # ★何mmまで近づいたら回避するか（ここを調整！）
 RESIZE_WIDTH = 416  # 推論時に縮小する幅（ピクセル）
 
@@ -35,7 +36,7 @@ class CozmoTracker:
         FRAME_SKIP = 3  # ★ 3フレームに1回だけAI推論（カクつくなら4や5に増やせます）
 
         while self.is_running:
-            if self.preventer and (self.preventer.is_avoiding_cliff or self.preventer.is_avoiding_collision):
+            if self.preventer and self.preventer.is_avoiding_cliff:
                 time.sleep(0.1)
                 continue
                 
@@ -60,7 +61,8 @@ class CozmoTracker:
                             scale_x = orig_w / resize_w
                             scale_y = orig_h / resize_h
 
-                            results = self.model(small, conf=0.75, verbose=False)
+                            # 検出をやや緩めて斜めや一部見切れにも反応しやすくする
+                            results = self.model(small, conf=0.60, verbose=False)
                             boxes = []
                             
                             for r in results:
@@ -74,8 +76,17 @@ class CozmoTracker:
                                     y2 = y2_s * scale_y
                                     w = x2 - x1
                                     h = y2 - y1
-                                    # 距離計算
-                                    distance_mm = (KNOWN_COZMO_WIDTH_MM * FOCAL_LENGTH_PIX) / w
+                                    if h == 0: continue
+                                    aspect_ratio = w / h
+                                    # 距離計算: 横長なら横幅、縦長なら高さを使う
+                                    if aspect_ratio >= 1.0:
+                                        effective_mm = KNOWN_COZMO_WIDTH_MM
+                                        effective_size = w
+                                    else:
+                                        effective_mm = KNOWN_COZMO_HEIGHT_MM
+                                        effective_size = h
+                                    effective_size = max(effective_size, 1.0)
+                                    distance_mm = (effective_mm * FOCAL_LENGTH_PIX) / effective_size
 
                                     # 追加: 画面上の位置情報とエッジ判定を行う（ただし検出自体は捨てない）
                                     frame_width = frame.shape[1]
@@ -98,6 +109,13 @@ class CozmoTracker:
                                         label_base += " (EDGE)"
 
                                     boxes.append({"box": (int(x1), int(y1), int(x2), int(y2)), "label": label_base})
+
+                                    # 軽量ログ: 近距離または高信頼度の検出のみ出力
+                                    try:
+                                        if conf_val >= 0.9 or distance_mm <= AVOID_DISTANCE_THRESHOLD_MM:
+                                            print(f"[CozmoDetect] conf={conf_val:.2f} dist={distance_mm:.1f} pos={position} edge={is_edge} aspect={aspect_ratio:.2f}")
+                                    except Exception:
+                                        pass
 
                                     # 回避ロジックには位置も渡す（既存のpreventerインターフェイスに合わせる）
                                     if self.preventer:
