@@ -33,6 +33,8 @@ class CameraViewer:
                         color = (0, 255, 0)    # 遠い＝緑色
                     elif "Cozmo" in label:
                         color = (0, 255, 255)  # 仲間＝黄色
+                    elif "ID:" in label:
+                        color = (255, 0, 255)  # ArUcoマーカー＝紫色
                     else:
                         color = (255, 255, 255)
 
