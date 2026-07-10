@@ -16,4 +16,5 @@ def main():
     slam_bot.save_map_data(json_filename="slam_data.json", img_filename="slam_map.png")
 
 if __name__ == "__main__":
+    
     main()
