@@ -67,7 +67,7 @@ class CubeTracker:
                             class_name = self.model.names[int(box.cls[0])]
                             
                             # 名前がキューブ以外なら無視する（YOLOの学習ラベル名に合わせて調整してください）
-                            if class_name.lower() not in ["cube", "powercube", "mark", "station"]: # ※Cubeやパワーキューブ、マーカー等を許可
+                            if class_name.lower() not in ["cube", "powercube", "mark", "station"]: 
                                 continue
 
                             conf_val = float(box.conf[0])

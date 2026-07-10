@@ -45,7 +45,8 @@ class CoordCommunication:
                         if data:
                             msg = json.loads(data.decode('utf-8'))
                             # 画面にリアルタイム表示
-                            print(f"[{time.strftime('%H:%M:%S')}] {msg['id']}: X={msg['x']:>6.2f}, Y={msg['y']:>6.2f}")
+                            if msg['id'] != "Cozmo-A":
+                                print(f"[{time.strftime('%H:%M:%S')}] {msg['id']}: X={msg['x']:>6.2f}, Y={msg['y']:>6.2f}")
                 except socket.timeout:
                     continue
                 except KeyboardInterrupt:
