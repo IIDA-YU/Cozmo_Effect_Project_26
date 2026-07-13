@@ -193,11 +193,14 @@ class CozmoSlamController:
             print(f"⚠️ マップ読み込みエラー: {e}")
             return False
 
-    def run(self):
-        cli = pycozmo.Client()
-        cli.start()
-        cli.connect()
-        cli.wait_for_robot()
+    def run(self, cli=None):
+        own_cli = False
+        if cli is None:
+            cli = pycozmo.Client()
+            cli.start()
+            cli.connect()
+            cli.wait_for_robot()
+            own_cli = True
         
         print("🤖 首のキャリブレーション（基準合わせ）を実行中...")
         time.sleep(0.5)
@@ -527,5 +530,7 @@ class CozmoSlamController:
                 
         finally:
             cli.drive_wheels(0.0, 0.0)
-            cli.disconnect(); cli.stop()
+            if own_cli:
+                cli.disconnect()
+                cli.stop()
             cv2.destroyAllWindows()
