@@ -61,7 +61,12 @@ def run_slam_mapping(cli):
     """
     print("\n=== SLAMマッピングを開始します ===")
     # SLAMコントローラーの準備（学習済みAIモデルを読み込む）
+     # 📝 1台目（マップを作る側）の設定
     slam_bot = CozmoSlamController(model_path="learning_data/best_powercube.pt", use_cached_map=False)
+    
+    # 📝 2台目（受信したマップを使う側）の場合は上を消して、こちらを有効にする
+    # slam_bot = CozmoSlamController(model_path="learning_data/best_powercube.pt", use_cached_map=True)
+    
     try:
         slam_bot.run(cli=cli) # SLAM実行。Ctrl+Cが押されるまでここでループし続けます
     except KeyboardInterrupt:
