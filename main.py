@@ -8,7 +8,7 @@ from hardware.step_detection import StepDetector
 from hardware.roaming_controller import RoamingController
 from camera.cozmo_tracker import CozmoTracker
 from camera.cube_tracker import CubeTracker
-from algorithm.mapping.visual_slam import CozmoSlamController
+from algorithm.mapping.visual_slam import run_slam_mapping
 from algorithm.virtual_pheromones.pheromone_navi_log import PheromoneTracker
 from telecommunication.coordinate_sender import CoordinateSender
 from telecommunication.pc_communication import CoordCommunication
@@ -53,22 +53,11 @@ TARGET_IP_DICT = {
 
 # =========================================================
 # 📍 3. フェーズ1：マッピング実行処理
+# 実際の処理（CozmoSlamControllerの生成・実行・マップ保存）は
+# すべて visual_slam.py 側の run_slam_mapping() にまとめてあるため、
+# ここでは呼び出すだけにしています。
 # =========================================================
-def run_slam_mapping(cli):
-    """
-    カメラ映像から特徴を抽出し、部屋の地図（マップ）を作成する処理。
-    引数の `cli` は、すでに確立されているCozmoとの通信回線です。
-    """
-    print("\n=== SLAMマッピングを開始します ===")
-    # SLAMコントローラーの準備（学習済みAIモデルを読み込む）
-    slam_bot = CozmoSlamController(model_path="learning_data/best_powercube.pt", use_cached_map=False)
-    try:
-        slam_bot.run(cli=cli) # SLAM実行。Ctrl+Cが押されるまでここでループし続けます
-    except KeyboardInterrupt:
-        print("\n\n🛑 マッピングを終了し、自律走行へ移行します...")
-    finally:
-        # 終了時に、作成したマップをJSONデータとして保存
-        slam_bot.save_map_data(json_filename="slam_data.json")
+# （関数定義はvisual_slam.pyからインポート済み。main.py側での再定義は不要）
 
 # =========================================================
 # 📍 4. フェーズ2：自律走行とAI・通信モジュールの統合処理
