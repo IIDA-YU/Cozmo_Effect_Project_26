@@ -1,6 +1,6 @@
 import time, threading, pycozmo
 from connect.network_check import cozmo_session
-from hardware.buttery import BatteryMonitor
+from hardware.battery import BatteryMonitor
 from camera.camera_movie import CameraViewer
 from performance.facial_expression import FaceManager
 from hardware.collision_prevention import CollisionPrevention
@@ -52,15 +52,7 @@ TARGET_IP_DICT = {
 # =========================================================
 
 # =========================================================
-# 📍 3. フェーズ1：マッピング実行処理
-# 実際の処理（CozmoSlamControllerの生成・実行・マップ保存）は
-# すべて visual_slam.py 側の run_slam_mapping() にまとめてあるため、
-# ここでは呼び出すだけにしています。
-# =========================================================
-# （関数定義はvisual_slam.pyからインポート済み。main.py側での再定義は不要）
-
-# =========================================================
-# 📍 4. フェーズ2：自律走行とAI・通信モジュールの統合処理
+# 📍 3. フェーズ2：自律走行とAI・通信モジュールの統合処理
 # =========================================================
 def run_autonomous_mode(cli):
     """
@@ -135,7 +127,7 @@ def run_autonomous_mode(cli):
         battery.stop()
 
 # =========================================================
-# 📍 5. 全体の進行管理（オーケストレーター）
+# 📍 4. 全体の進行管理（オーケストレーター）
 # =========================================================
 def run_network_map_and_roam():
     """
@@ -156,7 +148,7 @@ def run_network_map_and_roam():
         run_autonomous_mode(cli)
 
 # =========================================================
-# 📍 6. メニューと起動処理（エントリーポイント）
+# 📍 5. メニューと起動処理（エントリーポイント）
 # =========================================================
 def main():
     """
@@ -197,6 +189,5 @@ def main():
     except Exception as e:
         print(f"\nエラー：実行中に問題が発生しました。({e})")
 
-# このファイルが直接実行された時だけ main() を動かすおまじない
 if __name__ == "__main__":
     main()
