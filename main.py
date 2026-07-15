@@ -63,8 +63,7 @@ def run_autonomous_mode(cli):
     cli.conn_lock = threading.Lock()
 
     # --- ① 基礎システムの起動 ---
-    battery = BatteryMonitor(cli)
-    battery.start() # バッテリー残量の監視
+    (battery := BatteryMonitor(cli)).start() # バッテリー残量の監視
 
     camera_viewer = CameraViewer(cli, battery_monitor=battery)
     camera_viewer.start() # PC画面にカメラ映像を映すウィンドウを展開
