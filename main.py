@@ -63,32 +63,21 @@ def run_autonomous_mode(cli):
     cli.conn_lock = threading.Lock()
 
     # --- ① 基礎システムの起動 ---
+    # ※ := (セイウチ演算子) を使い、以下の2行の処理を1行にまとめています
+    # 1. camera_viewer = CameraViewer(...) で作成・代入
+    # 2. camera_viewer.start() で起動
     (battery := BatteryMonitor(cli)).start() # バッテリー残量の監視
+    (camera_viewer := CameraViewer(cli, battery_monitor=battery)).start() # PC画面にカメラ映像を映すウィンドウを展開
+    (face_manager := FaceManager(cli)).start() # Cozmoの顔（表情）の制御
 
-    camera_viewer = CameraViewer(cli, battery_monitor=battery)
-    camera_viewer.start() # PC画面にカメラ映像を映すウィンドウを展開
-
-    face_manager = FaceManager(cli) # Cozmoの顔（表情）の制御
-
-    # --- ② 危険回避システムの起動 ---
-    # カメラ情報と表情情報を渡し、障害物を避ける司令塔を作る
-    preventer = CollisionPrevention(cli, face_manager=face_manager, camera_viewer=camera_viewer)
-    
-    step_detector = StepDetector(cli, preventer)
-    step_detector.start() # 机から落ちないように段差を監視
+    # --- ② 障害物と段差回避システムの起動 ---
+    (preventer := CollisionPrevention(cli, face_manager=face_manager, camera_viewer=camera_viewer)).start() # 衝突回避システムの起動
+    (step_detector := StepDetector(cli, preventer)).start() # 机から落ちないように段差を赤外線センサーで監視
 
     # --- ③ AI画像認識システムの起動 ---
-    # YOLOを使って他のCozmoを見つける
-    cozmo_tracker = CozmoTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)
-    cozmo_tracker.start()
-    
-    # YOLOを使ってキューブを見つける
-    cube_tracker = CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)
-    cube_tracker.start()
-
-    # ArUcoマーカー（ID）を見つけて、TARGET_IP_DICTから宛先を特定する
-    aruco_tracker = ArucoCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)
-    aruco_tracker.start()
+    (cozmo_tracker := CozmoTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)).start() # 他のCozmoを見つける
+    (cube_tracker := CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)).start() # YOLOを使ってキューブを見つける
+    (aruco_tracker := ArucoCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)).start() # ArUcoマーカー（ID）を見つけて、TARGET_IP_DICTから宛先を特定する
 
     # --- ④ P2P 双方向通信システムの起動 ---
     # 受信機：他PCから送られてくる座標を受け取るサーバーを裏側で立てる
