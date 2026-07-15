@@ -172,7 +172,7 @@ class CozmoSlamController:
         with open(json_filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
         cv2.imwrite(img_filename, self.memory_map)
-        print(f"💾 マップデータを保存しました: {json_filename}, {img_filename}")
+        print(f"💾 マップデータを保存しました: {json_filename}")
 
     def load_map_data(self, json_filename="slam_data.json"):
         if not os.path.exists(json_filename):

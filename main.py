@@ -34,7 +34,7 @@ pycozmo.conn.Connection.send = thread_safe_send
 # アプリケーション全体で使う固定値（IPアドレスやポートなど）をまとめています。
 # 5台のPCにこのコードを配る際、ここだけを書き換えれば動くように設計されています。
 # =========================================================
-COZMO_SSID = "Cozmo_42A832" # Cozmo本体が発しているWi-Fiの名前
+COZMO_SSID = "Cozmo_613F59" # Cozmo本体が発しているWi-Fiの名前
 RETURN_SSID = "R0347"       # プログラム終了後に戻る学校/自宅のWi-Fi
 
 ROBOT_ID = "Cozmo-A"        # この機体の名前
@@ -67,8 +67,8 @@ def run_slam_mapping(cli):
     except KeyboardInterrupt:
         print("\n\n🛑 マッピングを終了し、自律走行へ移行します...")
     finally:
-        # 終了時に、作成したマップを画像とデータとして保存
-        slam_bot.save_map_data(json_filename="slam_data.json", img_filename="slam_map.png")
+        # 終了時に、作成したマップをJSONデータとして保存
+        slam_bot.save_map_data(json_filename="slam_data.json")
 
 # =========================================================
 # 📍 4. フェーズ2：自律走行とAI・通信モジュールの統合処理
