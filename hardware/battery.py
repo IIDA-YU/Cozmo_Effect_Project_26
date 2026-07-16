@@ -3,6 +3,7 @@
 # Cozmoのバッテリー残量を管理するためのモジュールクラス
 #----------------------------------------------------------------------
 
+import os
 import time
 import threading
 from collections import deque
@@ -10,6 +11,7 @@ from collections import deque
 import pycozmo
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 # ===== バッテリー電圧の目安 =====
 FULL_VOLTAGE = 4.2    # 満充電あたりの電圧(V) … これ以上は100%
@@ -20,6 +22,33 @@ WINDOW_SECONDS = 1.0   # この秒数ぶんを実測して平均する（直近1
 CHARGING_VOLTAGE = 4.2  # この電圧以上を「満充電(100%)」とみなす
 CHARGING_MIN_HITS = 3   # 充電判定に必要な最低サンプル数
 CHARGING_RATIO = 0.8    # 1秒ぶんの8割以上が100%なら「充電中」とみなす
+
+# ===== 「充電中」表示用の日本語フォント =====
+# cv2.putText は日本語（全角文字）を描画できないため、
+# 「充電中」の文字だけはPillow(PIL)を使って別方式で描画する。
+# 環境ごとにインストール場所が違うので、よくあるパスを順番に探す。
+_JP_FONT_CANDIDATES = [
+    "C:/Windows/Fonts/meiryo.ttc",                      # Windows
+    "C:/Windows/Fonts/msgothic.ttc",                    # Windows
+    "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",   # macOS
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",        # macOS
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",     # Linux
+]
+JP_FONT_SIZE = 18
+
+
+def _find_jp_font_path():
+    """使用できる日本語フォントのパスを探す。見つからなければNoneを返す。"""
+    for path in _JP_FONT_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+_JP_FONT_PATH = _find_jp_font_path()
+# フォントが見つかった場合だけPIL用のフォントオブジェクトを用意しておく
+_JP_FONT = ImageFont.truetype(_JP_FONT_PATH, JP_FONT_SIZE) if _JP_FONT_PATH else None
 
 
 def _read_voltage(pkt):
@@ -147,7 +176,9 @@ class BatteryMonitor:
 
         # 表示する文字・塗り色(BGR)を決める
         if charging:
-            label = "100%"
+            # 充電中は実際の残量(%)を表示すると誤解を招くため、
+            # 数値の代わりに「充電中」という文字を表示する
+            label = "充電中"
             fill_ratio = 1.0
             fill_color = (255, 200, 80)    # 水色（充電中）
         elif percent is None:
@@ -171,7 +202,16 @@ class BatteryMonitor:
         icon_w, icon_h = 26, 13
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale, font_thick = 0.45, 1
-        (tw, th), _ = cv2.getTextSize(label, font, font_scale, font_thick)
+
+        if charging and _JP_FONT is not None:
+            # 「充電中」は日本語なのでPillowでサイズを計測する
+            jp_bbox = _JP_FONT.getbbox(label)
+            tw, th = jp_bbox[2] - jp_bbox[0], jp_bbox[3] - jp_bbox[1]
+        else:
+            if charging:
+                # 日本語フォントが見つからない環境向けのフォールバック表示
+                label = "CHARGING"
+            (tw, th), _ = cv2.getTextSize(label, font, font_scale, font_thick)
 
         panel_w = pad + icon_w + 3 + gap + tw + pad
         panel_h = max(icon_h, th) + pad + 6
@@ -203,11 +243,15 @@ class BatteryMonitor:
         if charging:
             self._draw_bolt(frame, (bx1 + icon_w // 2, cy), icon_h)
 
-        # パーセント表示
+        # ラベル表示（「充電中」の日本語はPillowで、それ以外はcv2で描画）
         text_x = bx2 + 3 + gap
-        text_y = cy + th // 2
-        cv2.putText(frame, label, (text_x, text_y), font, font_scale,
-                    (245, 245, 245), font_thick, cv2.LINE_AA)
+        if charging and _JP_FONT is not None:
+            text_y_top = cy - th // 2 - jp_bbox[1]  # PILは左上基準なので補正する
+            frame = self._draw_jp_text(frame, label, (text_x, text_y_top), (245, 245, 245))
+        else:
+            text_y = cy + th // 2
+            cv2.putText(frame, label, (text_x, text_y), font, font_scale,
+                        (245, 245, 245), font_thick, cv2.LINE_AA)
         return frame
 
     @staticmethod
@@ -220,6 +264,21 @@ class BatteryMonitor:
         for cx, cy in ((x1 + radius, y1 + radius), (x2 - radius, y1 + radius),
                        (x1 + radius, y2 - radius), (x2 - radius, y2 - radius)):
             cv2.circle(img, (cx, cy), radius, color, -1)
+
+    @staticmethod
+    def _draw_jp_text(frame, text, top_left, color_bgr):
+        """
+        日本語テキストをフレームに描画する補助関数。
+        cv2.putText は日本語（全角文字）を描画できないため、
+        一度PIL画像に変換して文字を描き、またOpenCVの形式（BGR）に戻している。
+        """
+        x, y = top_left
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(rgb_frame)
+        draw = ImageDraw.Draw(img_pil)
+        color_rgb = (color_bgr[2], color_bgr[1], color_bgr[0])  # BGR→RGBに変換
+        draw.text((x, y), text, font=_JP_FONT, fill=color_rgb)
+        return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
     @staticmethod
     def _draw_bolt(frame, center, size):

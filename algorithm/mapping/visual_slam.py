@@ -172,7 +172,7 @@ class CozmoSlamController:
         with open(json_filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
         cv2.imwrite(img_filename, self.memory_map)
-        print(f"💾 マップデータを保存しました: {json_filename}, {img_filename}")
+        print(f"💾 マップデータを保存しました: {json_filename}")
 
     def load_map_data(self, json_filename="slam_data.json"):
         if not os.path.exists(json_filename):
@@ -534,3 +534,28 @@ class CozmoSlamController:
                 cli.disconnect()
                 cli.stop()
             cv2.destroyAllWindows()
+
+
+#----------------------------------------------------------------------
+# main.py などの呼び出し側から1〜2行で使えるようにするための
+# エントリーポイント関数。CozmoSlamControllerの生成・実行・保存の
+# 一連の処理をこの関数の中にまとめている。
+#----------------------------------------------------------------------
+def run_slam_mapping(cli, model_path="learning_data/best_powercube.pt", use_cached_map=False, json_filename="slam_data.json"):
+    """
+    SLAMマッピングを開始から保存まで一括で実行する。
+
+    引数:
+        cli: 接続済みのCozmoクライアント(pycozmo.Client)
+        model_path: YOLOモデルファイルのパス
+        use_cached_map: Trueの場合、既存のマップデータを読み込んで再利用する
+        json_filename: マップデータの保存先ファイル名
+    """
+    print("\n=== SLAMマッピングを開始します ===")
+    slam_bot = CozmoSlamController(model_path=model_path, use_cached_map=use_cached_map)
+    try:
+        slam_bot.run(cli=cli)
+    except KeyboardInterrupt:
+        print("\n\n🛑 マッピングを終了し、自律走行へ移行します...")
+    finally:
+        slam_bot.save_map_data(json_filename=json_filename)
