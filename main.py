@@ -1,6 +1,6 @@
 import time, threading, pycozmo
 from connect.network_check import cozmo_session
-from hardware.buttery import BatteryMonitor
+from hardware.battery import BatteryMonitor
 from camera.camera_movie import CameraViewer
 from performance.facial_expression import FaceManager
 from hardware.collision_prevention import CollisionPrevention
@@ -8,7 +8,7 @@ from hardware.step_detection import StepDetector
 from hardware.roaming_controller import RoamingController
 from camera.cozmo_tracker import CozmoTracker
 from camera.cube_tracker import CubeTracker
-from algorithm.mapping.visual_slam import CozmoSlamController
+from algorithm.mapping.visual_slam import run_slam_mapping
 from algorithm.virtual_pheromones.pheromone_navi_log import PheromoneTracker
 from telecommunication.coordinate_sender import CoordinateSender
 from telecommunication.pc_communication import CoordCommunication
@@ -34,7 +34,7 @@ pycozmo.conn.Connection.send = thread_safe_send
 # アプリケーション全体で使う固定値（IPアドレスやポートなど）をまとめています。
 # 5台のPCにこのコードを配る際、ここだけを書き換えれば動くように設計されています。
 # =========================================================
-COZMO_SSID = "Cozmo_42A832" # Cozmo本体が発しているWi-Fiの名前
+COZMO_SSID = "Cozmo_613F59" # Cozmo本体が発しているWi-Fiの名前
 RETURN_SSID = "R0347"       # プログラム終了後に戻る学校/自宅のWi-Fi
 
 ROBOT_ID = "Cozmo-A"        # この機体の名前
@@ -52,31 +52,7 @@ TARGET_IP_DICT = {
 # =========================================================
 
 # =========================================================
-# 📍 3. フェーズ1：マッピング実行処理
-# =========================================================
-def run_slam_mapping(cli):
-    """
-    カメラ映像から特徴を抽出し、部屋の地図（マップ）を作成する処理。
-    引数の `cli` は、すでに確立されているCozmoとの通信回線です。
-    """
-    print("\n=== SLAMマッピングを開始します ===")
-    # SLAMコントローラーの準備（学習済みAIモデルを読み込む）
-     # 📝 1台目（マップを作る側）の設定
-    slam_bot = CozmoSlamController(model_path="learning_data/best_powercube.pt", use_cached_map=False)
-    
-    # 📝 2台目（受信したマップを使う側）の場合は上を消して、こちらを有効にする
-    # slam_bot = CozmoSlamController(model_path="learning_data/best_powercube.pt", use_cached_map=True)
-    
-    try:
-        slam_bot.run(cli=cli) # SLAM実行。Ctrl+Cが押されるまでここでループし続けます
-    except KeyboardInterrupt:
-        print("\n\n🛑 マッピングを終了し、自律走行へ移行します...")
-    finally:
-        # 終了時に、作成したマップを画像とデータとして保存
-        slam_bot.save_map_data(json_filename="slam_data.json", img_filename="slam_map.png")
-
-# =========================================================
-# 📍 4. フェーズ2：自律走行とAI・通信モジュールの統合処理
+# 📍 3. フェーズ2：自律走行とAI・通信モジュールの統合処理
 # =========================================================
 def run_autonomous_mode(cli):
     """
@@ -87,33 +63,21 @@ def run_autonomous_mode(cli):
     cli.conn_lock = threading.Lock()
 
     # --- ① 基礎システムの起動 ---
-    battery = BatteryMonitor(cli)
-    battery.start() # バッテリー残量の監視
+    # ※ := (セイウチ演算子) を使い、以下の2行の処理を1行にまとめています
+    # 1. camera_viewer = CameraViewer(...) で作成・代入
+    # 2. camera_viewer.start() で起動
+    (battery := BatteryMonitor(cli)).start() # バッテリー残量の監視
+    (camera_viewer := CameraViewer(cli, battery_monitor=battery)).start() # PC画面にカメラ映像を映すウィンドウを展開
+    (face_manager := FaceManager(cli)).start() # Cozmoの顔（表情）の制御
 
-    camera_viewer = CameraViewer(cli, battery_monitor=battery)
-    camera_viewer.start() # PC画面にカメラ映像を映すウィンドウを展開
-
-    face_manager = FaceManager(cli) # Cozmoの顔（表情）の制御
-
-    # --- ② 危険回避システムの起動 ---
-    # カメラ情報と表情情報を渡し、障害物を避ける司令塔を作る
-    preventer = CollisionPrevention(cli, face_manager=face_manager, camera_viewer=camera_viewer)
-    
-    step_detector = StepDetector(cli, preventer)
-    step_detector.start() # 机から落ちないように段差を監視
+    # --- ② 障害物と段差回避システムの起動 ---
+    (preventer := CollisionPrevention(cli, face_manager=face_manager, camera_viewer=camera_viewer)).start() # 衝突回避システムの起動
+    (step_detector := StepDetector(cli, preventer)).start() # 机から落ちないように段差を赤外線センサーで監視
 
     # --- ③ AI画像認識システムの起動 ---
-    # YOLOを使って他のCozmoを見つける
-    cozmo_tracker = CozmoTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)
-    cozmo_tracker.start()
-    
-    # YOLOを使ってキューブを見つける
-    cube_tracker = CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)
-    cube_tracker.start()
-
-    # ArUcoマーカー（ID）を見つけて、TARGET_IP_DICTから宛先を特定する
-    aruco_tracker = ArucoCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)
-    aruco_tracker.start()
+    (cozmo_tracker := CozmoTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)).start() # 他のCozmoを見つける
+    (cube_tracker := CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)).start() # YOLOを使ってキューブを見つける
+    (aruco_tracker := ArucoCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)).start() # ArUcoマーカー（ID）を見つけて、TARGET_IP_DICTから宛先を特定する
 
     # --- ④ P2P 双方向通信システムの起動 ---
     # 受信機：他PCから送られてくる座標を受け取るサーバーを裏側で立てる
@@ -151,7 +115,7 @@ def run_autonomous_mode(cli):
         battery.stop()
 
 # =========================================================
-# 📍 5. 全体の進行管理（オーケストレーター）
+# 📍 4. 全体の進行管理（オーケストレーター）
 # =========================================================
 def run_network_map_and_roam():
     """
@@ -172,7 +136,7 @@ def run_network_map_and_roam():
         run_autonomous_mode(cli)
 
 # =========================================================
-# 📍 6. メニューと起動処理（エントリーポイント）
+# 📍 5. メニューと起動処理（エントリーポイント）
 # =========================================================
 def main():
     """
@@ -213,6 +177,5 @@ def main():
     except Exception as e:
         print(f"\nエラー：実行中に問題が発生しました。({e})")
 
-# このファイルが直接実行された時だけ main() を動かすおまじない
 if __name__ == "__main__":
     main()
