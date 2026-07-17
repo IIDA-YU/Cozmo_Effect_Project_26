@@ -62,9 +62,6 @@ def run_autonomous_mode(cli):
     print("\n🔧 自律走行モードを起動します...")
     cli.conn_lock = threading.Lock()
 
-    # --- 💡 改修ポイント：動的メソッド実行関数 ---
-    # モジュール側（FaceManagerなど）の起動メソッド名が start/run/activate/begin
-    # のいずれであっても、自動で検知して呼び出す安全な関数を定義します。
     def safe_start_module(module_obj):
         if hasattr(module_obj, "start"):
             module_obj.start()
@@ -99,7 +96,6 @@ def run_autonomous_mode(cli):
         safe_start_module(camera_viewer)
         started_modules.append(camera_viewer)
 
-        # 💡 ここでFaceManagerのメソッド名が何であっても自動で適切なものを呼び出します
         face_manager = init_steps[2][1]()
         safe_start_module(face_manager)
         started_modules.append(face_manager)
@@ -176,6 +172,8 @@ def run_autonomous_mode(cli):
         try: cozmo_tracker.stop()
         except: pass
         try: step_detector.stop()
+        except: pass
+        try: face_manager.stop()
         except: pass
         try: camera_viewer.stop()
         except: pass

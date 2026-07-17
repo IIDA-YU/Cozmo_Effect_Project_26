@@ -3,7 +3,6 @@
 # Cozmoの表情を管理するためのモジュールクラス
 #----------------------------------------------------------------------
 
-
 import time
 import threading
 from PIL import Image, ImageDraw
@@ -18,6 +17,20 @@ class FaceManager:
         self.current_frame = None    # 現在表示している画像フレーム
         self.stop_flag = False       # 画像送信スレッドを止めるためのフラグ
         self.stream_thread = None    # 画像送信専用スレッド
+
+    def start(self):
+        """
+        メインプログラムから呼び出される標準の起動メソッド。
+        ※FaceManagerは表情変更の要求があった時だけスレッドを立てるため、初期化時は何もしません。
+        """
+        pass
+
+    def stop(self):
+        """
+        メインプログラム終了時に呼び出される標準の停止メソッド。
+        表情をデフォルトに戻し、スレッドを安全に終了します。
+        """
+        self.show_default_face()
 
     def _frame_streamer(self):
         """画像を高速で送信し続ける専用のスレッド（内部用）"""
