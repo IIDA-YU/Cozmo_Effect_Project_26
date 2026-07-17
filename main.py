@@ -34,7 +34,7 @@ pycozmo.conn.Connection.send = thread_safe_send
 # アプリケーション全体で使う固定値（IPアドレスやポートなど）をまとめています。
 # 5台のPCにこのコードを配る際、ここだけを書き換えれば動くように設計されています。
 # =========================================================
-COZMO_SSID = "Cozmo_613F59" # Cozmo本体が発しているWi-Fiの名前
+COZMO_SSID = "Cozmo_42A832" # Cozmo本体が発しているWi-Fiの名前
 RETURN_SSID = "R0347"       # プログラム終了後に戻る学校/自宅のWi-Fi
 
 ROBOT_ID = "Cozmo-A"        # この機体の名前
@@ -113,46 +113,24 @@ def run_autonomous_mode(cli):
         step_detector.stop()
         camera_viewer.stop()
         battery.stop()
-
-# =========================================================
-# 📍 4. 全体の進行管理（オーケストレーター）
-# =========================================================
-def run_network_map_and_roam():
-    """
-    Wi-Fiの切り替え → マッピング → 自律走行 を一本道で進める関数。
-    """
-    print("\n=== 一連の処理（マッピング → 自律走行）を開始します ===")
     
-    # cozmo_sessionが自動的にCozmoのWi-Fiに切り替え、接続オブジェクト(cli)を作成する
-    with cozmo_session(COZMO_SSID, RETURN_SSID) as cli:
-        print("✅ Cozmoと接続しました。")
-        
-        # 1つの通信(cli)を維持したまま、まずはマッピングへ引き渡す
-        run_slam_mapping(cli)
-        
-        time.sleep(1.5) # 次の処理へ行く前の安全なインターバル
-        
-        # 通信(cli)を切らずに、そのまま自律走行へ引き継ぐ
-        run_autonomous_mode(cli)
-
+if __name__ == "__main__":
 # =========================================================
-# 📍 5. メニューと起動処理（エントリーポイント）
+# ~~ まずここから実行されます（選択肢分岐は以下から） ~~
+# 1: 🤖 ネット切り替え → マッピング → 自律走行 (本番用)
+# 2: 💻 受信デバッグ (Cozmoに繋がず、相手からの座標を受信・表示するだけ)
+# 3: 📡 送信デバッグ (Cozmoに繋がず、ダミーの座標を相手に送信テスト)
 # =========================================================
-def main():
-    """
-    起動時に最初に呼ばれる関数。
-    ユーザーにどのモードで動かすかを選択させます。
-    """
-    print("\n【システム起動メニュー】")
-    print("1: 🤖 ネット切り替え → マッピング → 自律走行 (本番用)")
-    print("2: 💻 受信デバッグ (Cozmoに繋がず、相手からの座標を受信・表示するだけ)")
-    print("3: 📡 送信デバッグ (Cozmoに繋がず、ダミーの座標を相手に送信テスト)")
 
     try:
-        choice = input("\nモードを選択してください (1 / 2 / 3): ").strip()
+        choice = input("\nモードの選択｛コメントアウト参照｝ (1 / 2 / 3): ").strip()
         
         if choice == '1':
-            run_network_map_and_roam()
+            with cozmo_session(COZMO_SSID, RETURN_SSID) as cli:
+                print("✅ Cozmoと接続しました。")
+                run_slam_mapping(cli)       # マッピング（SLAM）モジュールの呼び出し
+                time.sleep(1.5)             # 次の処理へ行く前の安全なインターバル
+                run_autonomous_mode(cli)    # 自律走行モードの呼び出し
             
         elif choice == '2':
             # 通信テスト用：受信サーバーのみ単独で起動
@@ -176,6 +154,3 @@ def main():
         print("\nユーザー操作によりシステムを終了しました。")
     except Exception as e:
         print(f"\nエラー：実行中に問題が発生しました。({e})")
-
-if __name__ == "__main__":
-    main()
