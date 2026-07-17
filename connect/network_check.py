@@ -16,7 +16,6 @@ import pycozmo
 
 def get_current_ssid():
     """現在PCが接続しているWi-Fiの名前(SSID)を返す。未接続ならNone。"""
-    print("🛜   Cozmoに接続しています")
     try:
         result = subprocess.run(
             ["netsh", "wlan", "show", "interfaces"],
@@ -145,6 +144,7 @@ def cozmo_session(cozmo_ssid, return_ssid):
 
     ※事前準備：一度PCから手動でCozmoのWi-Fiへ接続し、パスワードを保存しておいてください。
     """
+    print("🛜   Cozmoに接続しています")
     # 1. CozmoのWi-Fiへ切り替え
     if not switch_wifi(cozmo_ssid):
         raise RuntimeError(f"CozmoのWi-Fi [{cozmo_ssid}] へ接続できませんでした。")
@@ -163,4 +163,3 @@ def cozmo_session(cozmo_ssid, return_ssid):
         except Exception as e:
             print(f"警告：Cozmo本体の切断中に問題が発生しました（{e}）")
         switch_wifi(return_ssid)
-        print("--- Cozmoセッションを終了しました ---")
