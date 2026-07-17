@@ -15,26 +15,11 @@ from telecommunication.pc_communication import CoordCommunication
 from camera.aruco_tracker import ArucoCoordinateTracker
 
 # =========================================================
-# 🛠️ 1. マルチスレッド通信の安全対策（排他制御）
-# 複数のAIや通信モジュールが「同時に」Cozmoへ命令を送ると通信がクラッシュします。
-# これを防ぐため、pycozmoの根幹の送信関数を上書きし、Lock(鍵)を使って
-# 「必ず順番に1つずつデータを送る」ように改造しています。
-# =========================================================
-original_send = pycozmo.conn.Connection.send
-_global_pycozmo_lock = threading.Lock()
-
-def thread_safe_send(self, pkt):
-    with _global_pycozmo_lock:
-        original_send(self, pkt)
-
-pycozmo.conn.Connection.send = thread_safe_send
-
-# =========================================================
-# 📌 2. 環境設定（コンフィグレーション）
+# 🚨 【環境設定】SSIDなどは全てここで変更してから実行 🚨
 # アプリケーション全体で使う固定値（IPアドレスやポートなど）をまとめています。
 # 5台のPCにこのコードを配る際、ここだけを書き換えれば動くように設計されています。
 # =========================================================
-COZMO_SSID = "Cozmo_42A832" # Cozmo本体が発しているWi-Fiの名前
+COZMO_SSID = "Cozmo_613F59" # 接続するCozmoのSSIDを入力
 RETURN_SSID = "R0347"       # プログラム終了後に戻る学校/自宅のWi-Fi
 
 ROBOT_ID = "Cozmo-A"        # この機体の名前
@@ -193,7 +178,6 @@ if __name__ == "__main__":
         
         if choice == '1':
             with cozmo_session(COZMO_SSID, RETURN_SSID) as cli:
-                print("✅ Cozmoと接続しました。")
                 run_slam_mapping(cli)       # マッピング（SLAM）モジュールの呼び出し
                 time.sleep(1.5)             # 次の処理へ行く前の安全なインターバル
                 run_autonomous_mode(cli)    # 自律走行モードの呼び出し

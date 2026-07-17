@@ -150,8 +150,6 @@ def cozmo_session(cozmo_ssid, return_ssid):
 
     ※事前準備：一度PCから手動でCozmoのWi-Fiへ接続し、パスワードを保存しておいてください。
     """
-    print("--- Cozmoセッションを開始します ---")
-
     # 1. CozmoのWi-Fiへ切り替え
     if not switch_wifi(cozmo_ssid):
         raise RuntimeError(f"CozmoのWi-Fi [{cozmo_ssid}] へ接続できませんでした。")
