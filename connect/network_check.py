@@ -40,7 +40,7 @@ def get_current_ssid():
 
 
 def _connect_to_wifi(ssid):
-    """指定SSIDへの接続をPCに命令する（コマンド送信の成否を返す）。"""
+    """指定SSIDへの接続をPCに命令する。致命的なエラー時は"FATAL"を返す。"""
     print(f"接続中：[{ssid}] へ接続しています...")
     try:
         result = subprocess.run(
@@ -57,7 +57,8 @@ def _connect_to_wifi(ssid):
     if result.returncode != 0:
         print("接続エラー：接続コマンドに失敗しました。")
         print("通知：このWi-Fiのパスワードが保存されていない可能性があります。一度手動で接続してください。")
-        return False
+        # パスワード未保存など、リトライしても解決しないエラーの場合は専用の文字列を返す
+        return "FATAL"
     return True
 
 
@@ -87,7 +88,14 @@ def switch_wifi(target_ssid, max_retries=3):
             print(f"接続完了：すでに [{target_ssid}] に接続されています。")
             return True
 
-        if _connect_to_wifi(target_ssid) and _wait_for_wifi(target_ssid):
+        # 接続コマンドの発行
+        connect_status = _connect_to_wifi(target_ssid)
+        
+        # 致命的なエラー（パスワード未保存など）の場合はリトライせずに即終了
+        if connect_status == "FATAL":
+            return False
+
+        if connect_status is True and _wait_for_wifi(target_ssid):
             return True
 
         if attempt < max_retries:
