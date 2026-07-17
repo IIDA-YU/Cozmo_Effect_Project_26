@@ -1,4 +1,4 @@
-import time, threading, pycozmo
+import time, threading, traceback, pycozmo
 from connect.network_check import cozmo_session
 from hardware.battery import BatteryMonitor
 from camera.camera_movie import CameraViewer
@@ -62,22 +62,82 @@ def run_autonomous_mode(cli):
     print("\n🔧 自律走行モードを起動します...")
     cli.conn_lock = threading.Lock()
 
-    # --- ① 基礎システムの起動 ---
-    # ※ := (セイウチ演算子) を使い、以下の2行の処理を1行にまとめています
-    # 1. camera_viewer = CameraViewer(...) で作成・代入
-    # 2. camera_viewer.start() で起動
-    (battery := BatteryMonitor(cli)).start() # バッテリー残量の監視
-    (camera_viewer := CameraViewer(cli, battery_monitor=battery)).start() # PC画面にカメラ映像を映すウィンドウを展開
-    (face_manager := FaceManager(cli)).start() # Cozmoの顔（表情）の制御
+    # --- 💡 改修ポイント：動的メソッド実行関数 ---
+    # モジュール側（FaceManagerなど）の起動メソッド名が start/run/activate/begin
+    # のいずれであっても、自動で検知して呼び出す安全な関数を定義します。
+    def safe_start_module(module_obj):
+        if hasattr(module_obj, "start"):
+            module_obj.start()
+        elif hasattr(module_obj, "run"):
+            module_obj.run()
+        elif hasattr(module_obj, "begin"):
+            module_obj.begin()
+        elif hasattr(module_obj, "activate"):
+            module_obj.activate()
+        else:
+            print(f"⚠️ {module_obj.__class__.__name__} に起動メソッド(start/run/begin/activate)が見つかりません。")
 
-    # --- ② 障害物と段差回避システムの起動 ---
-    (preventer := CollisionPrevention(cli, face_manager=face_manager, camera_viewer=camera_viewer)).start() # 衝突回避システムの起動
-    (step_detector := StepDetector(cli, preventer)).start() # 机から落ちないように段差を赤外線センサーで監視
+    # --- ① 基礎システムの起動 〜 ③ AI画像認識システムの起動 ---
+    started_modules = []
+    init_steps = [
+        ("BatteryMonitor",       lambda: BatteryMonitor(cli)),
+        ("CameraViewer",         lambda: CameraViewer(cli, battery_monitor=battery)),
+        ("FaceManager",          lambda: FaceManager(cli)),
+        ("CollisionPrevention",  lambda: CollisionPrevention(cli, face_manager=face_manager, camera_viewer=camera_viewer)),
+        ("StepDetector",         lambda: StepDetector(cli, preventer)),
+        ("CozmoTracker",         lambda: CozmoTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)),
+        ("CubeTracker",          lambda: CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)),
+        ("ArucoCoordinateTracker", lambda: ArucoCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)),
+    ]
 
-    # --- ③ AI画像認識システムの起動 ---
-    (cozmo_tracker := CozmoTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)).start() # 他のCozmoを見つける
-    (cube_tracker := CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)).start() # YOLOを使ってキューブを見つける
-    (aruco_tracker := ArucoCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)).start() # ArUcoマーカー（ID）を見つけて、TARGET_IP_DICTから宛先を特定する
+    try:
+        battery = init_steps[0][1]()
+        safe_start_module(battery)
+        started_modules.append(battery)
+
+        camera_viewer = init_steps[1][1]()
+        safe_start_module(camera_viewer)
+        started_modules.append(camera_viewer)
+
+        # 💡 ここでFaceManagerのメソッド名が何であっても自動で適切なものを呼び出します
+        face_manager = init_steps[2][1]()
+        safe_start_module(face_manager)
+        started_modules.append(face_manager)
+
+        preventer = init_steps[3][1]()
+        safe_start_module(preventer)
+        started_modules.append(preventer)
+
+        step_detector = init_steps[4][1]()
+        safe_start_module(step_detector)
+        started_modules.append(step_detector)
+
+        cozmo_tracker = init_steps[5][1]()
+        safe_start_module(cozmo_tracker)
+        started_modules.append(cozmo_tracker)
+
+        cube_tracker = init_steps[6][1]()
+        safe_start_module(cube_tracker)
+        started_modules.append(cube_tracker)
+
+        aruco_tracker = init_steps[7][1]()
+        safe_start_module(aruco_tracker)
+        started_modules.append(aruco_tracker)
+
+    except Exception as e:
+        failed_name = init_steps[len(started_modules)][0]
+        print(f"\n❌ 初期化中にエラー発生：直前に成功したのは "
+              f"{started_modules[-1].__class__.__name__ if started_modules else '(なし)'}、"
+              f"失敗したのはおそらく {failed_name} です。")
+        print(f"エラー詳細: {e}")
+        traceback.print_exc()
+        # 起動済みのモジュールだけ、逆順で安全に停止しておく
+        for m in reversed(started_modules):
+            try:
+                m.stop()
+            except Exception:
+                pass
+        raise  # ここで再送出し、呼び出し元（cozmo_session）に切断処理を任せる
 
     # --- ④ P2P 双方向通信システムの起動 ---
     # 受信機：他PCから送られてくる座標を受け取るサーバーを裏側で立てる
@@ -88,14 +148,14 @@ def run_autonomous_mode(cli):
 
     # 送信機：自分の現在座標を0.2秒ごとに指定した相手に送信し続ける
     coord_sender = CoordinateSender(cli, target_ip=TARGET_PC_IP, robot_id=ROBOT_ID, interval=0.2)
-    coord_sender.start()
+    safe_start_module(coord_sender)
 
     # --- ⑤ 自律走行コントローラーの起動 ---
     # 回避システム(preventer)の指示に従いながら、基本は前進し続ける処理
     roamer = RoamingController(cli, preventer)
     
     try:
-        roamer.start()
+        safe_start_module(roamer)
         print("\n🚀 自律走行および【双方向通信】【機体識別】を開始しました！")
         # メインスレッド（このプログラム自体）が終了しないように、ここで無限ループして待機
         while True:
@@ -103,16 +163,24 @@ def run_autonomous_mode(cli):
     finally:
         # Ctrl+Cが押されたら、起動した全てのシステムを順番に安全に止める
         print("\n🛑 停止中...")
-        roamer.stop()
-        coord_sender.stop()
+        try: roamer.stop() 
+        except: pass
+        try: coord_sender.stop()
+        except: pass
         if hasattr(receiver, "running"):
             receiver.running = False
-        aruco_tracker.stop()
-        cube_tracker.stop()
-        cozmo_tracker.stop()
-        step_detector.stop()
-        camera_viewer.stop()
-        battery.stop()
+        try: aruco_tracker.stop()
+        except: pass
+        try: cube_tracker.stop()
+        except: pass
+        try: cozmo_tracker.stop()
+        except: pass
+        try: step_detector.stop()
+        except: pass
+        try: camera_viewer.stop()
+        except: pass
+        try: battery.stop()
+        except: pass
     
 if __name__ == "__main__":
 # =========================================================
@@ -154,3 +222,4 @@ if __name__ == "__main__":
         print("\nユーザー操作によりシステムを終了しました。")
     except Exception as e:
         print(f"\nエラー：実行中に問題が発生しました。({e})")
+        traceback.print_exc()
