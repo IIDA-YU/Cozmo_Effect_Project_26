@@ -167,11 +167,13 @@ class CozmoSlamController:
             "mapped_cubes": self.persistent_mapped_cubes
         }
 
-    def save_map_data(self, json_filename="slam_data.json", img_filename="slam_map.png"):
+    def save_map_data(self, json_filename="slam_data.json"):
+        """
+        JSONファイルのみを出力するように修正。
+        """
         data = self.get_map_data()
         with open(json_filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-        cv2.imwrite(img_filename, self.memory_map)
         print(f"💾 マップデータを保存しました: {json_filename}")
 
     def load_map_data(self, json_filename="slam_data.json"):
