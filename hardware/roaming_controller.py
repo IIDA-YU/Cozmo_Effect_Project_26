@@ -23,7 +23,7 @@ class RoamingController:
                     continue  # すぐに前進せず、もう一度AIの検知結果（is_avoiding）を確認しに戻る
                 
                 # 崖や障害物から逃げている最中（直後）でなければ前進
-                try: self.cli.drive_wheels(40, 40)
+                try: self.cli.drive_wheels(55, 55)
                 except: pass
             time.sleep(0.1)
 
