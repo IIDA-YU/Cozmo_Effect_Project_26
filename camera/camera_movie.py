@@ -30,26 +30,22 @@ class CameraViewer:
                 for det in det_list:
                     x1, y1, x2, y2 = det["box"]
                     label = det.get("label", "")
-                    display_label = f"{key} {label}".strip()
                     
-                    # 検出種別ごとに枠の色を変える
-                    if key == "apriltag":
-                        color = (255, 128, 0)   # AprilTag＝オレンジ
-                    elif key == "aruco":
-                        color = (255, 0, 255)   # ArUco＝紫
-                    # ラベルの文字を見て、例外的に色を変える
-                    elif "WARNING" in label:
+                    # ラベルの文字を見て、枠の色を変える
+                    if "WARNING" in label:
                         color = (0, 0, 255)    # 危険＝赤色
                     elif "FAR" in label:
                         color = (0, 255, 0)    # 遠い＝緑色
                     elif "Cozmo" in label:
                         color = (0, 255, 255)  # 仲間＝黄色
+                    elif "ID:" in label:
+                        color = (255, 0, 255)  # ArUcoマーカー＝紫色
                     else:
                         color = (255, 255, 255)
 
                     cv2.rectangle(img_bgr, (x1, y1), (x2, y2), color, 2)
                     # 枠線の上に文字（例：Cube FAR 65%）を表示して分かりやすくする
-                    cv2.putText(img_bgr, display_label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    cv2.putText(img_bgr, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         if self.battery_monitor: img_bgr = self.battery_monitor.draw_overlay(img_bgr)
         with self._lock: self._latest_image = img_bgr

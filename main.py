@@ -13,14 +13,13 @@ from algorithm.virtual_pheromones.pheromone_navi_log import PheromoneTracker
 from telecommunication.coordinate_sender import CoordinateSender
 from telecommunication.pc_communication import CoordCommunication
 from camera.aruco_tracker import ArucoCoordinateTracker
-from camera.apriltag_tracker import ApriltagCoordinateTracker
 
 # =========================================================
 # 🚨 【環境設定】SSIDなどは全てここで変更してから実行 🚨
 # アプリケーション全体で使う固定値（IPアドレスやポートなど）をまとめています。
 # 5台のPCにこのコードを配る際、ここだけを書き換えれば動くように設計されています。
 # =========================================================
-COZMO_SSID = "Cozmo_42A832" # 接続するCozmoのSSIDを入力
+COZMO_SSID = "Cozmo_613F59" # 接続するCozmoのSSIDを入力
 RETURN_SSID = "R0347"       # プログラム終了後に戻る学校/自宅のWi-Fi
 
 ROBOT_ID = "Cozmo-A"        # この機体の名前
@@ -71,7 +70,6 @@ def run_autonomous_mode(cli):
         ("CozmoTracker",         lambda: CozmoTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)),
         ("CubeTracker",          lambda: CubeTracker(cli, collision_preventer=preventer, camera_viewer=camera_viewer)),
         ("ArucoCoordinateTracker", lambda: ArucoCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)),
-        ("ApriltagCoordinateTracker", lambda: ApriltagCoordinateTracker(cli, target_ip_dict=TARGET_IP_DICT, camera_viewer=camera_viewer)),
     ]
 
     try:
@@ -106,10 +104,6 @@ def run_autonomous_mode(cli):
         aruco_tracker = init_steps[7][1]()
         safe_start_module(aruco_tracker)
         started_modules.append(aruco_tracker)
-
-        apriltag_tracker = init_steps[8][1]()
-        safe_start_module(apriltag_tracker)
-        started_modules.append(apriltag_tracker)
 
     except Exception as e:
         failed_name = init_steps[len(started_modules)][0]
@@ -157,8 +151,6 @@ def run_autonomous_mode(cli):
         if hasattr(receiver, "running"):
             receiver.running = False
         try: aruco_tracker.stop()
-        except: pass
-        try: apriltag_tracker.stop()
         except: pass
         try: cube_tracker.stop()
         except: pass
