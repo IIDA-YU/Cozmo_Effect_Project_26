@@ -7,13 +7,97 @@
 # ----------------------------------------------------------------------
 
 import threading
+import time
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
 import pycozmo
 
 
+MIN_EXPOSURE_MS = 1
+MAX_EXPOSURE_MS = 30
+MIN_GAIN = 1.0
+MAX_GAIN = 8.0
+DEFAULT_EXPOSURE_MS = 5
+DEFAULT_GAIN = 1.0
+DEFAULT_AUTO_EXPOSURE = False
+
 _CHESS_CLAHE = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8))
+
+
+@dataclass
+class CameraSettings:
+    """Cozmo本体へ送る露出設定。"""
+
+    exposure_ms: int = DEFAULT_EXPOSURE_MS
+    gain: float = DEFAULT_GAIN
+    auto_exposure: bool = DEFAULT_AUTO_EXPOSURE
+
+
+def normalize_camera_settings(settings=None):
+    """設定値をCozmoカメラの安全な範囲へ収め、独立した値として返す。"""
+    source = settings if settings is not None else CameraSettings()
+    return CameraSettings(
+        exposure_ms=int(
+            max(
+                MIN_EXPOSURE_MS,
+                min(MAX_EXPOSURE_MS, source.exposure_ms),
+            )
+        ),
+        gain=float(max(MIN_GAIN, min(MAX_GAIN, source.gain))),
+        auto_exposure=bool(source.auto_exposure),
+    )
+
+
+def apply_camera_settings(client, settings, announce=True):
+    """露出・ゲイン・自動露出の設定をCozmo本体へ送信する。"""
+    normalized = normalize_camera_settings(settings)
+    packet = pycozmo.protocol_encoder.SetCameraParams(
+        gain=normalized.gain,
+        exposure_ms=normalized.exposure_ms,
+        auto_exposure_enabled=normalized.auto_exposure,
+    )
+    client.conn.send(packet)
+
+    if announce:
+        mode = "AUTO" if normalized.auto_exposure else "MANUAL"
+        print(
+            f"📷 カメラ設定: {mode} / "
+            f"露出 {normalized.exposure_ms}ms / "
+            f"ゲイン {normalized.gain:.2f}"
+        )
+
+    return normalized
+
+
+def configure_cozmo_camera(
+    client,
+    settings=None,
+    color=True,
+    announce=True,
+    settle_seconds=0.15,
+):
+    """
+    カメラ配信・ライト・露出を一括設定する。
+
+    配信開始直後の初期化で設定が上書きされる個体にも対応できるよう、
+    短い待機後に同じ露出設定をもう一度送る。
+    """
+    normalized = normalize_camera_settings(settings)
+    client.enable_camera(enable=True, color=color)
+
+    if hasattr(client, "set_head_light"):
+        # 動作確認済みのcozmo_camera_capture.pyと同じ呼び出し方に統一する。
+        client.set_head_light(False)
+
+    apply_camera_settings(client, normalized, announce=announce)
+
+    if settle_seconds > 0:
+        time.sleep(settle_seconds)
+        apply_camera_settings(client, normalized, announce=False)
+
+    return normalized
 
 
 def cozmo_image_to_bgr(image):
@@ -61,10 +145,17 @@ def enhance_chess_frame(frame_bgr):
 
 
 class CameraViewer:
-    def __init__(self, cli, battery_monitor=None, enhance_image=True):
+    def __init__(
+        self,
+        cli,
+        battery_monitor=None,
+        enhance_image=True,
+        camera_settings=None,
+    ):
         self.cli = cli
         self.battery_monitor = battery_monitor
         self.enhance_image = enhance_image
+        self.camera_settings = normalize_camera_settings(camera_settings)
         self.window_name = "Cozmo Camera View"
         self._is_active = False
         self._latest_image = None
@@ -124,12 +215,18 @@ class CameraViewer:
         with self._lock:
             self._latest_image = img_bgr
 
-    def ensure_color_camera(self):
-        """他モジュールの起動後でも、カメラをカラー配信へ戻す。"""
-        if hasattr(self.cli, "set_head_light"):
-            # 白い机での反射・白飛びを増やさないよう、ヘッドライトは消灯する。
-            self.cli.set_head_light(enable=False)
-        self.cli.enable_camera(enable=True, color=True)
+    def ensure_camera_settings(self, announce=False):
+        """カラー配信と手動露出をまとめて再適用する。"""
+        self.camera_settings = configure_cozmo_camera(
+            self.cli,
+            settings=self.camera_settings,
+            color=True,
+            announce=announce,
+        )
+
+    def ensure_color_camera(self, announce=False):
+        """旧呼び出し名との互換性を保つ。"""
+        self.ensure_camera_settings(announce=announce)
 
     def start(self):
         if self._is_active:
@@ -140,7 +237,7 @@ class CameraViewer:
             pycozmo.event.EvtNewRawCameraImage,
             self.on_camera_image,
         )
-        self.ensure_color_camera()
+        self.ensure_camera_settings(announce=True)
         threading.Thread(target=self._display_loop, daemon=True).start()
 
     def _display_loop(self):

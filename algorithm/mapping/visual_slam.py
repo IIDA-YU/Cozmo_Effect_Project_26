@@ -17,7 +17,12 @@ import numpy as np
 import pycozmo
 from ultralytics import YOLO
 
-from camera.camera_movie import cozmo_image_to_bgr, enhance_chess_frame
+from camera.camera_movie import (
+    configure_cozmo_camera,
+    cozmo_image_to_bgr,
+    enhance_chess_frame,
+    normalize_camera_settings,
+)
 
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -36,6 +41,7 @@ class CozmoSlamController:
         confidence_threshold=0.35,
         inference_size=640,
         enhance_image=True,
+        camera_settings=None,
     ):
         model_path = self._resolve_model_path(model_path)
         print(f"チェス駒AIモデル({model_path})を準備中...")
@@ -44,6 +50,7 @@ class CozmoSlamController:
         self.CONFIDENCE_THRESHOLD = confidence_threshold
         self.INFERENCE_SIZE = inference_size
         self.ENHANCE_IMAGE = enhance_image
+        self.camera_settings = normalize_camera_settings(camera_settings)
         self.CHESS_CLASS_IDS = self._find_chess_class_ids()
 
         # --- 約20mmのチェス駒を使う教室デスク向けパラメータ ---
@@ -495,9 +502,12 @@ class CozmoSlamController:
                 pycozmo.event.EvtNewRawCameraImage,
                 self.on_camera_image,
             )
-            if hasattr(cli, "set_head_light"):
-                cli.set_head_light(enable=False)
-            cli.enable_camera(enable=True, color=True)
+            self.camera_settings = configure_cozmo_camera(
+                cli,
+                settings=self.camera_settings,
+                color=True,
+                announce=True,
+            )
             
             last_head_cmd_time = time.time()
             loop_closed = False
@@ -845,6 +855,7 @@ def run_slam_mapping(
     model_path=DEFAULT_CHESS_MODEL_PATH,
     use_cached_map=False,
     json_filename="slam_data.json",
+    camera_settings=None,
 ):
     """
     SLAMマッピングを開始から保存まで一括で実行する。
@@ -854,9 +865,14 @@ def run_slam_mapping(
         model_path: YOLOモデルファイルのパス
         use_cached_map: Trueの場合、既存のマップデータを読み込んで再利用する
         json_filename: マップデータの保存先ファイル名
+        camera_settings: Cozmoカメラへ適用する露出・ゲイン設定
     """
     print("\n=== SLAMマッピングを開始します ===")
-    slam_bot = CozmoSlamController(model_path=model_path, use_cached_map=use_cached_map)
+    slam_bot = CozmoSlamController(
+        model_path=model_path,
+        use_cached_map=use_cached_map,
+        camera_settings=camera_settings,
+    )
     try:
         slam_bot.run(cli=cli)
     except KeyboardInterrupt:

@@ -1,7 +1,7 @@
 import time, threading, traceback, pycozmo
 from connect.network_check import cozmo_session
 from hardware.battery import BatteryMonitor
-from camera.camera_movie import CameraViewer
+from camera.camera_movie import CameraSettings, CameraViewer
 from performance.facial_expression import FaceManager
 from hardware.collision_prevention import CollisionPrevention
 from hardware.step_detection import StepDetector
@@ -33,6 +33,14 @@ LISTEN_PORT = 50007         # 座標データを受信するポート番号
 # 配置先:
 # algorithm/mapping/learning_data/best_chess_4.0.pt
 CHESS_MODEL_PATH = DEFAULT_CHESS_MODEL_PATH
+
+# cozmo_camera_capture.pyと同一の露出設定を、SLAMと自律走行で共用する。
+# 白飛びを防ぐため、自動露出は使用しない。
+COZMO_CAMERA_SETTINGS = CameraSettings(
+    exposure_ms=5,
+    gain=1.0,
+    auto_exposure=False,
+)
 
 # ArUcoマーカーのIDと、そのマーカーを付けている機体を操作するPCのIPアドレスの対応表
 TARGET_IP_DICT = {
@@ -77,6 +85,7 @@ def run_autonomous_mode(cli):
                 cli,
                 battery_monitor=battery,
                 enhance_image=True,
+                camera_settings=COZMO_CAMERA_SETTINGS,
             ),
         ),
         ("FaceManager",          lambda: FaceManager(cli)),
@@ -120,9 +129,9 @@ def run_autonomous_mode(cli):
         safe_start_module(aruco_tracker)
         started_modules.append(aruco_tracker)
 
-        # 後から起動した検出モジュールがカメラを白黒へ戻した場合にも、
-        # 最終的な配信モードをカラーへ統一する。
-        camera_viewer.ensure_color_camera()
+        # 後から起動した検出モジュールが設定を変更した場合にも、
+        # カラー・手動露出5ms・ゲイン1.0を最後に再適用する。
+        camera_viewer.ensure_camera_settings()
 
     except Exception as e:
         if len(started_modules) < len(init_steps):
@@ -203,6 +212,7 @@ if __name__ == "__main__":
                 run_slam_mapping(
                     cli,
                     model_path=str(CHESS_MODEL_PATH),
+                    camera_settings=COZMO_CAMERA_SETTINGS,
                 )                           # マッピング（SLAM）モジュールの呼び出し
                 time.sleep(1.5)             # 次の処理へ行く前の安全なインターバル
                 run_autonomous_mode(cli)    # 自律走行モードの呼び出し
