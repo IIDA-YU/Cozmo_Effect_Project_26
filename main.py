@@ -8,7 +8,10 @@ from hardware.step_detection import StepDetector
 from hardware.roaming_controller import RoamingController
 from camera.cozmo_tracker import CozmoTracker
 from camera.cube_tracker import CubeTracker
-from algorithm.mapping.visual_slam import run_slam_mapping
+from algorithm.mapping.visual_slam import (
+    DEFAULT_CHESS_MODEL_PATH,
+    run_slam_mapping,
+)
 from algorithm.virtual_pheromones.pheromone_navi_log import PheromoneTracker
 from telecommunication.coordinate_sender import CoordinateSender
 from telecommunication.pc_communication import CoordCommunication
@@ -25,6 +28,11 @@ RETURN_SSID = "R0347"       # プログラム終了後に戻る学校/自宅のW
 ROBOT_ID = "Cozmo-A"        # この機体の名前
 TARGET_PC_IP = "127.0.0.1"  # 送信テスト用の宛先IP
 LISTEN_PORT = 50007         # 座標データを受信するポート番号
+
+# visual_slam.pyと同じ場所で定義したモデルパスを使用する。
+# 配置先:
+# algorithm/mapping/learning_data/best_chess_4.0.pt
+CHESS_MODEL_PATH = DEFAULT_CHESS_MODEL_PATH
 
 # ArUcoマーカーのIDと、そのマーカーを付けている機体を操作するPCのIPアドレスの対応表
 TARGET_IP_DICT = {
@@ -63,7 +71,14 @@ def run_autonomous_mode(cli):
     started_modules = []
     init_steps = [
         ("BatteryMonitor",       lambda: BatteryMonitor(cli)),
-        ("CameraViewer",         lambda: CameraViewer(cli, battery_monitor=battery)),
+        (
+            "CameraViewer",
+            lambda: CameraViewer(
+                cli,
+                battery_monitor=battery,
+                enhance_image=True,
+            ),
+        ),
         ("FaceManager",          lambda: FaceManager(cli)),
         ("CollisionPrevention",  lambda: CollisionPrevention(cli, face_manager=face_manager, camera_viewer=camera_viewer)),
         ("StepDetector",         lambda: StepDetector(cli, preventer)),
@@ -105,8 +120,15 @@ def run_autonomous_mode(cli):
         safe_start_module(aruco_tracker)
         started_modules.append(aruco_tracker)
 
+        # 後から起動した検出モジュールがカメラを白黒へ戻した場合にも、
+        # 最終的な配信モードをカラーへ統一する。
+        camera_viewer.ensure_color_camera()
+
     except Exception as e:
-        failed_name = init_steps[len(started_modules)][0]
+        if len(started_modules) < len(init_steps):
+            failed_name = init_steps[len(started_modules)][0]
+        else:
+            failed_name = "CameraViewerのカラー設定"
         print(f"\n❌ 初期化中にエラー発生：直前に成功したのは "
               f"{started_modules[-1].__class__.__name__ if started_modules else '(なし)'}、"
               f"失敗したのはおそらく {failed_name} です。")
@@ -178,7 +200,10 @@ if __name__ == "__main__":
         
         if choice == '1':
             with cozmo_session(COZMO_SSID, RETURN_SSID) as cli:
-                run_slam_mapping(cli)       # マッピング（SLAM）モジュールの呼び出し
+                run_slam_mapping(
+                    cli,
+                    model_path=str(CHESS_MODEL_PATH),
+                )                           # マッピング（SLAM）モジュールの呼び出し
                 time.sleep(1.5)             # 次の処理へ行く前の安全なインターバル
                 run_autonomous_mode(cli)    # 自律走行モードの呼び出し
             
