@@ -8,7 +8,6 @@ os.environ["YOLO_OFFLINE"] = "True"
 
 import json
 import math
-import threading
 import time
 from pathlib import Path
 
@@ -18,9 +17,7 @@ import pycozmo
 from ultralytics import YOLO
 
 from camera.camera_movie import (
-    configure_cozmo_camera,
-    cozmo_image_to_bgr,
-    enhance_chess_frame,
+    CameraViewer,
     normalize_camera_settings,
 )
 
@@ -34,6 +31,8 @@ DEFAULT_CHESS_MODEL_PATH = (
 
 
 class CozmoSlamController:
+    MAP_WINDOW_NAME = "Cozmo SLAM Map"
+
     def __init__(
         self,
         model_path=DEFAULT_CHESS_MODEL_PATH,
@@ -42,6 +41,7 @@ class CozmoSlamController:
         inference_size=640,
         enhance_image=True,
         camera_settings=None,
+        camera_viewer=None,
     ):
         model_path = self._resolve_model_path(model_path)
         print(f"チェス駒AIモデル({model_path})を準備中...")
@@ -51,6 +51,7 @@ class CozmoSlamController:
         self.INFERENCE_SIZE = inference_size
         self.ENHANCE_IMAGE = enhance_image
         self.camera_settings = normalize_camera_settings(camera_settings)
+        self.camera_viewer = camera_viewer
         self.CHESS_CLASS_IDS = self._find_chess_class_ids()
 
         # --- 約20mmのチェス駒を使う教室デスク向けパラメータ ---
@@ -76,9 +77,6 @@ class CozmoSlamController:
         self.current_raw_x, self.current_raw_y = 0.0, 0.0 
         self.target_x = None
         self.target_y = None
-        self.latest_image = None
-        self._image_lock = threading.Lock()
-        self._camera_handler = None
         self._last_detection_error_time = 0.0
         self.robot_trajectory = [] 
         self.distance_history = {}
@@ -156,19 +154,10 @@ class CozmoSlamController:
             return None
         return class_ids
 
-    def on_camera_image(self, cli, image):
-        frame = cozmo_image_to_bgr(image)
-        if self.ENHANCE_IMAGE:
-            frame = enhance_chess_frame(frame)
-
-        with self._image_lock:
-            self.latest_image = frame
-
     def _get_latest_image(self):
-        with self._image_lock:
-            if self.latest_image is None:
-                return None
-            return self.latest_image.copy()
+        if self.camera_viewer is None:
+            return None
+        return self.camera_viewer.get_latest_frame()
 
     def _report_detection_error(self, error):
         """同じ推論エラーでコンソールを埋めず、原因は確認できるようにする。"""
@@ -478,13 +467,31 @@ class CozmoSlamController:
 
     def run(self, cli=None):
         own_cli = False
+        own_camera_viewer = False
         if cli is None:
             cli = pycozmo.Client()
             cli.start()
             cli.connect()
             cli.wait_for_robot()
             own_cli = True
-        
+
+        if self.camera_viewer is None:
+            self.camera_viewer = CameraViewer(
+                cli,
+                enhance_image=self.ENHANCE_IMAGE,
+                camera_settings=self.camera_settings,
+            )
+            own_camera_viewer = True
+
+        # SLAMマップとカメラを同じGUIスレッドから更新する。
+        self.camera_viewer.start(background_display=False)
+        self.camera_viewer.open_window()
+        cv2.namedWindow(self.MAP_WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+        cv2.setMouseCallback(self.MAP_WINDOW_NAME, self.mouse_callback)
+        cv2.imshow(self.MAP_WINDOW_NAME, self.memory_map)
+        cv2.waitKey(1)
+        print("💡 カメラ: B=明るく / N=暗く / M=自動・手動 / 0=初期値")
+
         print("🤖 首のキャリブレーション（基準合わせ）を実行中...")
         time.sleep(0.5)
         cli.set_head_angle(-1.0)  
@@ -494,23 +501,10 @@ class CozmoSlamController:
         cli.set_lift_height(0.0)  
         time.sleep(1.5)           
         
-        cv2.namedWindow("Cozmo SLAM Map")
-        cv2.setMouseCallback("Cozmo SLAM Map", self.mouse_callback)
-        
         try:
-            self._camera_handler = cli.add_handler(
-                pycozmo.event.EvtNewRawCameraImage,
-                self.on_camera_image,
-            )
-            self.camera_settings = configure_cozmo_camera(
-                cli,
-                settings=self.camera_settings,
-                color=True,
-                announce=True,
-            )
-            
             last_head_cmd_time = time.time()
             loop_closed = False
+            transition_requested = False
             
             map_loaded = False
             if self.use_cached_map:
@@ -524,7 +518,11 @@ class CozmoSlamController:
                 )
                 scan_start_time = time.time()
                 
-                while time.time() - scan_start_time < 75.0 and not loop_closed: 
+                while (
+                    time.time() - scan_start_time < 75.0
+                    and not loop_closed
+                    and not transition_requested
+                ):
                     current_time = time.time()
                     if current_time - last_head_cmd_time > 1.5:
                         cli.set_head_angle(self.TARGET_HEAD_ANGLE)
@@ -547,6 +545,7 @@ class CozmoSlamController:
                             
                         self.update_fov_map(est_x, est_y, est_theta)
                         
+                        detections = []
                         try:
                             detections = self.detect_chess_pieces(frame)
                             best_detection = self._select_center_detection(
@@ -626,15 +625,26 @@ class CozmoSlamController:
                         except Exception as error:
                             self._report_detection_error(error)
                         
+                        preview_img = frame.copy()
+                        self.draw_chess_detections(preview_img, detections)
+                        self.camera_viewer.display_once(
+                            frame_override=preview_img,
+                        )
                         map_img = self.draw_memory_map(est_x, est_y, est_theta)
-                        cv2.imshow("Cozmo SLAM Map", map_img)
-                        cv2.waitKey(1)
+                        cv2.imshow(self.MAP_WINDOW_NAME, map_img)
+                        key = self.camera_viewer.poll_key(delay_ms=1)
+                        if key in (ord("q"), 27):
+                            print("➡️ SLAMを終了し、自律走行へ移行します...")
+                            transition_requested = True
                     time.sleep(0.05)
-                print(f"✅ スキャン完了！（クリック待ちです）")
+                print("✅ スキャン完了！（クリック待ちです）")
             else:
-                print(f"⏭️ スキャンをスキップし、既存のマップでナビゲーションを開始します。")
+                print("⏭️ スキャンをスキップし、既存のマップでナビゲーションを開始します。")
 
             cli.drive_wheels(0.0, 0.0) 
+
+            if transition_requested:
+                return
 
             # 🚀 マップ構築後、自律パトロール用のウェイポイントを生成
             self.waypoints = self.generate_patrol_waypoints()
@@ -756,13 +766,13 @@ class CozmoSlamController:
                             out_of_bounds = True
 
                     if out_of_bounds:
-                        cv2.putText(display_img, "VIRTUAL FENCE! ESCAPE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                        cv2.putText(display_img, "VIRTUAL FENCE! ESCAPE", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                         cli.drive_wheels(-10.0, -10.0)
                         time.sleep(0.4)
                         self.target_x, self.target_y = None, None 
                     
                     elif any(math.hypot(est_x - tx, est_y - ty) < 60.0 for tx, ty in self.true_landmarks.values()):
-                        cv2.putText(display_img, "WALL BLOCK! STOP", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                        cv2.putText(display_img, "WALL BLOCK! STOP", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                         cli.drive_wheels(-15.0, -15.0)
                         time.sleep(0.4)
                         self.target_x, self.target_y = None, None 
@@ -783,11 +793,11 @@ class CozmoSlamController:
                                 time.sleep(1.0) # 到着したら1秒停止
                         
                         elif abs(angle_diff) > 0.3:
-                            cv2.putText(display_img, "ADJUSTING HEADING", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                            cv2.putText(display_img, "ADJUSTING HEADING", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
                             if angle_diff > 0: cli.drive_wheels(-12.0, 12.0)
                             else: cli.drive_wheels(12.0, -12.0)
                         else:
-                            cv2.putText(display_img, "NAVIGATING TO TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                            cv2.putText(display_img, "NAVIGATING TO TARGET", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                             cli.drive_wheels(22.0, 22.0)
                             
                     # 🚀 追加: 自律パトロールモードで目標地点が空の時、自動設定する
@@ -797,23 +807,23 @@ class CozmoSlamController:
                         print(f"🤖 [自律パトロール] 次の経由地({self.target_x:.0f}, {self.target_y:.0f})を設定しました")
                         
                     else:
-                        cv2.putText(display_img, "WAITING FOR CLICK...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                        cv2.putText(display_img, "WAITING FOR CLICK...", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                         cli.drive_wheels(0.0, 0.0)
 
                     # --- UI表示の更新 ---
                     if correction_triggered:
-                        cv2.putText(display_img, "SLAM FIXED!", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+                        cv2.putText(display_img, "SLAM FIXED!", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
                         
                     mode_text = "AUTO PATROL MODE" if self.autonomous_mode else "MANUAL (CLICK) MODE"
-                    cv2.putText(display_img, mode_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if self.autonomous_mode else (255, 255, 255), 2)
+                    cv2.putText(display_img, mode_text, (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if self.autonomous_mode else (255, 255, 255), 2)
 
-                    cv2.imshow("Cozmo Camera", display_img)
+                    self.camera_viewer.display_once(frame_override=display_img)
                     map_img = self.draw_memory_map(est_x, est_y, est_theta)
-                    cv2.imshow("Cozmo SLAM Map", map_img)
+                    cv2.imshow(self.MAP_WINDOW_NAME, map_img)
                     
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q'): 
-                        print("🚪 アプリケーションを終了します...")
+                    key = self.camera_viewer.poll_key(delay_ms=1)
+                    if key in (ord('q'), 27):
+                        print("➡️ SLAMを終了し、自律走行へ移行します...")
                         break
                     elif key == ord('a'): 
                         self.offset_theta -= 0.2
@@ -833,16 +843,15 @@ class CozmoSlamController:
                 
         finally:
             cli.drive_wheels(0.0, 0.0)
-            if self._camera_handler is not None and hasattr(cli, "del_handler"):
-                cli.del_handler(
-                    pycozmo.event.EvtNewRawCameraImage,
-                    self._camera_handler,
-                )
-                self._camera_handler = None
+            try:
+                cv2.destroyWindow(self.MAP_WINDOW_NAME)
+            except cv2.error:
+                pass
+            if own_camera_viewer:
+                self.camera_viewer.stop()
             if own_cli:
                 cli.disconnect()
                 cli.stop()
-            cv2.destroyAllWindows()
 
 
 #----------------------------------------------------------------------
@@ -856,6 +865,7 @@ def run_slam_mapping(
     use_cached_map=False,
     json_filename="slam_data.json",
     camera_settings=None,
+    camera_viewer=None,
 ):
     """
     SLAMマッピングを開始から保存まで一括で実行する。
@@ -866,12 +876,14 @@ def run_slam_mapping(
         use_cached_map: Trueの場合、既存のマップデータを読み込んで再利用する
         json_filename: マップデータの保存先ファイル名
         camera_settings: Cozmoカメラへ適用する露出・ゲイン設定
+        camera_viewer: SLAMと自律走行で共有するCameraViewer
     """
     print("\n=== SLAMマッピングを開始します ===")
     slam_bot = CozmoSlamController(
         model_path=model_path,
         use_cached_map=use_cached_map,
         camera_settings=camera_settings,
+        camera_viewer=camera_viewer,
     )
     try:
         slam_bot.run(cli=cli)

@@ -16,6 +16,7 @@ from algorithm.virtual_pheromones.pheromone_navi_log import PheromoneTracker
 from telecommunication.coordinate_sender import CoordinateSender
 from telecommunication.pc_communication import CoordCommunication
 from camera.aruco_tracker import ArucoCoordinateTracker
+from system_controller import ApplicationConfig, run_application
 
 # =========================================================
 # 🚨 【環境設定】SSIDなどは全てここで変更してから実行 🚨
@@ -240,3 +241,24 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nエラー：実行中に問題が発生しました。({e})")
         traceback.print_exc()
+
+# =========================================================
+# 5台のPCへ配布する場合は、この設定値だけを機体ごとに変更する。
+# =========================================================
+CONFIG = ApplicationConfig(
+    cozmo_ssid="Cozmo_613F59",
+    return_ssid="R0347",
+    robot_id="Cozmo-A",
+    target_pc_ip="127.0.0.1",
+    listen_port=50007,
+    target_ip_dict={
+        1: "172.18.67.189",
+        2: "172.18.67.198",
+        3: "192.168.1.12",
+        4: "192.168.1.13",
+        5: "192.168.1.14",
+    },
+)
+
+if __name__ == "__main__":
+    run_application(CONFIG)
