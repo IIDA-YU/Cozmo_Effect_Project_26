@@ -1083,7 +1083,7 @@ class CozmoSlamController:
         self.autonomous_mode = True
         print("🤖 地図を参照して自律パトロールを開始します。Pで停止・再開、QでSLAM終了。")
 
-    def run(self, cli=None):
+    def run(self, cli=None, mapping_only=False):
         self._camera_adjustment_completed = False
         self._map_loaded_from_json = False
         self._map_created_this_run = False
@@ -1146,12 +1146,16 @@ class CozmoSlamController:
                 cli.drive_wheels(0.0, 0.0)
                 print(f"⏭️ {self.json_filename} を使用し、マッピングをスキップします。")
 
-            self._activate_autonomous_navigation()
+            if not mapping_only:
+                self._activate_autonomous_navigation()
             if not map_loaded:
                 self._map_created_this_run = True
                 # 6個そろった段階で保存。走行終了まで待たず、次回から使用可能にする。
                 self.save_map_data()
             
+            if mapping_only:
+                return True  # チェス地図完成。探索開始は研究コントローラが決める。
+
             # === 2. ナビゲーションフェーズ ===
             while True:
                 current_time = time.time()

@@ -122,6 +122,7 @@ def _connect_robot(max_retries=3):
         except Exception as e:
             if cli is not None:
                 cli.disconnect()
+                cli.stop()
             print(f"通信エラー（試行 {attempt}/{max_retries}）：{e}")
             if attempt < max_retries:
                 print("Wi-Fiが不安定な可能性があります。5秒後に再接続します...")
@@ -158,16 +159,19 @@ def cozmo_session(cozmo_ssid, return_ssid):
         raise RuntimeError(f"CozmoのWi-Fi [{cozmo_ssid}] へ接続できませんでした。")
 
     # 2. 本体へ接続
-    cli = _connect_robot()
+    cli = None
 
     try:
+        cli = _connect_robot()
         # 3. 処理本体へ cli を渡す
         yield cli
     finally:
         # 4. 終了処理（本体切断 → Wi-Fi復帰）
         print("\n--- 🛜  元のWi-Fiへ接続しています ---")
         try:
-            cli.disconnect()
+            if cli is not None:
+                cli.disconnect()
+                cli.stop()
         except Exception as e:
             print(f"警告：Cozmo本体の切断中に問題が発生しました（{e}）")
         switch_wifi(return_ssid)

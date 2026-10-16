@@ -172,6 +172,8 @@ class CameraViewer:
         self.window_name = "Cozmo Camera View"
         self._is_active = False
         self._latest_image = None
+        self._frame_time = 0.0
+        self._frame_number = 0
         self._camera_handler = None
         self._display_thread = None
         self._window_created = False
@@ -203,6 +205,8 @@ class CameraViewer:
         # 検出枠や文字は表示時に重ねる。映像取得スレッドではGUIを触らない。
         with self._lock:
             self._latest_image = img_bgr
+            self._frame_time = time.monotonic()
+            self._frame_number += 1
 
     def get_latest_frame(self):
         """検出処理にも利用できる最新フレームのコピーを返す。"""
@@ -210,6 +214,12 @@ class CameraViewer:
             if self._latest_image is None:
                 return None
             return self._latest_image.copy()
+
+    def get_frame_sample(self):
+        """古いフレームで探索済みと判定しないため、番号・受信時刻も返す。"""
+        with self._lock:
+            frame = None if self._latest_image is None else self._latest_image.copy()
+            return frame, self._frame_number, self._frame_time
 
     def _draw_detections(self, frame):
         image_height, image_width = frame.shape[:2]

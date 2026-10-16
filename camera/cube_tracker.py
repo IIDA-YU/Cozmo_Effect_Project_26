@@ -2,7 +2,7 @@ import threading, time, os, cv2, numpy as np
 from ultralytics import YOLO
 import pycozmo
 
-KNOWN_CUBE_WIDTH_MM = 30.0  # ※実際のキューブの大きさに合わせて変更してください（標準は約44mmです）
+KNOWN_CUBE_WIDTH_MM = 50.0  # 全体検出モデル。本体の高さ50mmを使う（探索本体はresearch/perception.py）
 FOCAL_LENGTH_PIX = 235.0    
 AVOID_DISTANCE_THRESHOLD_MM = 90.0  
 RESIZE_WIDTH = 416
@@ -67,7 +67,7 @@ class CubeTracker:
                             class_name = self.model.names[int(box.cls[0])]
                             
                             # 名前がキューブ以外なら無視する（YOLOの学習ラベル名に合わせて調整してください）
-                            if class_name.lower() not in ["cube", "powercube", "mark", "station"]: 
+                            if class_name.lower() not in ["cube", "powercube"]: 
                                 continue
 
                             conf_val = float(box.conf[0])
@@ -110,9 +110,12 @@ class CubeTracker:
                                     if not allow_rotated:
                                         continue
                                 
-                            # 距離計算: 横が見切れていても「高さと幅の大きい方」を使って正確な距離を出す
-                            effective_size = max(w, h)
-                            distance_mm = (KNOWN_CUBE_WIDTH_MM * FOCAL_LENGTH_PIX) / effective_size
+                            # 全体枠の高さで近似測距する。斜めで広くなる横幅は使用しない。
+                            effective_size = h
+                            focal = FOCAL_LENGTH_PIX * orig_w / 320.0
+                            distance_mm = (KNOWN_CUBE_WIDTH_MM * focal) / effective_size
+                            if x1 <= 2 or y1 <= 2 or x2 >= orig_w - 2 or y2 >= orig_h - 2:
+                                distance_mm = 0.0  # 見切れは測距不能。旧回避器には近接として通知。
                             
                             if distance_mm <= AVOID_DISTANCE_THRESHOLD_MM:
                                 boxes.append({"box": (int(x1), int(y1), int(x2), int(y2)), "label": f"Cube WARNING {int(distance_mm)}mm"})
