@@ -15,6 +15,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pycozmo
+import torch
+torch.set_num_threads(4)
 from ultralytics import YOLO
 
 from camera.camera_movie import (
@@ -40,7 +42,7 @@ class CozmoSlamController:
         model_path=DEFAULT_CHESS_MODEL_PATH,
         use_cached_map=True,
         confidence_threshold=0.35,
-        inference_size=640,
+        inference_size=320,
         enhance_image=True,
         camera_settings=None,
         camera_viewer=None,
@@ -88,11 +90,12 @@ class CozmoSlamController:
             raise ValueError("検出上限距離は100〜2000mmにしてください")
         self.MIN_DETECTION_DISTANCE_MM = 35.0
         self.EXPECTED_LANDMARKS = 6
-        self.LANDMARK_MATCH_DISTANCE_MM = 80.0
+        self.LANDMARK_MATCH_DISTANCE_MM = 130.0
         self.MATCH_AMBIGUITY_MM = 15.0
-        self.CANDIDATE_MATCH_DISTANCE_MM = 35.0
+        self.CANDIDATE_MATCH_DISTANCE_MM = 45.0
+        self.EXISTING_LANDMARK_MIN_DISTANCE_MM = 120.0
         self.MIN_CONFIRMATIONS = 3
-        self.MAX_HEADING_ERROR = math.radians(30)
+        self.MAX_HEADING_ERROR = math.radians(40)
         self.candidate_landmarks = []
         self.last_observations = []
         self.last_correction = "Waiting for landmarks"
@@ -436,7 +439,7 @@ class CozmoSlamController:
             lx, ly = self.true_landmarks[landmark_id]
             heading_error = self._wrap_angle(math.atan2(ly-y, lx-x) - theta - obs["bearing"])
             if (abs(heading_error) <= self.MAX_HEADING_ERROR and
-                    abs(math.hypot(lx-x, ly-y) - obs["distance"]) <= 80.0):
+                    abs(math.hypot(lx-x, ly-y) - obs["distance"]) <= self.LANDMARK_MATCH_DISTANCE_MM):
                 proposals.append((error, index, landmark_id))
             else:
                 obs["detection"]["map_status"] = "Match rejected"
@@ -550,7 +553,7 @@ class CozmoSlamController:
             x = pose[0] + obs["distance"] * math.cos(pose[2] + obs["bearing"])
             y = pose[1] + obs["distance"] * math.sin(pose[2] + obs["bearing"])
             # 補正で地図座標が変わった場合にも既存IDの重複を作らない。
-            if any(math.hypot(x-lx, y-ly) < self.CANDIDATE_MATCH_DISTANCE_MM
+            if any(math.hypot(x-lx, y-ly) < self.EXISTING_LANDMARK_MIN_DISTANCE_MM
                    for lx, ly in self.true_landmarks.values()):
                 detection["map_status"] = "Near existing / retry"
                 continue
@@ -764,7 +767,7 @@ class CozmoSlamController:
                     self.candidate_landmarks.clear()
                     search_until = now + 1.0
                 else:
-                    cli.drive_wheels(0.0, 0.0) if observing else cli.drive_wheels(-8.0, 8.0)
+                    cli.drive_wheels(0.0, 0.0) if observing else cli.drive_wheels(-5.0, 5.0)
                     est_x, est_y, est_theta = self._get_estimated_pose(
                         self.current_raw_x, self.current_raw_y, self.current_raw_theta)
                     detections = []
@@ -795,7 +798,7 @@ class CozmoSlamController:
                             if now >= search_until and any(not o["near_existing"] for o in proposals):
                                 cli.drive_wheels(0.0, 0.0)
                                 observing = True
-                                settle_until = time.monotonic() + 0.35
+                                settle_until = time.monotonic() + 0.5
                                 observation_count = 0
                                 self.candidate_landmarks.clear()
                                 self.last_correction = "Stopped: measuring new landmark"
@@ -832,7 +835,7 @@ class CozmoSlamController:
                           f"{self.EXPECTED_LANDMARKS}個。Uncalibrated表示はCで校正、Out of rangeは距離を確認してください。")
                     last_report_time = now
                 if len(self.true_landmarks) < self.EXPECTED_LANDMARKS:
-                    time.sleep(0.05)
+                    time.sleep(0.01)
             print("✅ チェス駒6個の登録が完了しました。次のフェーズへ進みます。")
             return True
         finally:
@@ -881,9 +884,10 @@ class CozmoSlamController:
             vec_y = center_y - pt[1]
             length = math.hypot(vec_x, vec_y)
             if length > 0:
-                wp_x = pt[0] + (vec_x / length) * margin
-                wp_y = pt[1] + (vec_y / length) * margin
-                waypoints.append((wp_x, wp_y))
+                actual_margin = min(margin, length * 0.45)
+                wp_x = pt[0] + (vec_x / length) * actual_margin
+                wp_y = pt[1] + (vec_y / length) * actual_margin
+                waypoints.append((float(wp_x), float(wp_y)))
         
         print(f"📍 自動ウェイポイントを {len(waypoints)} 箇所生成しました。")
         return waypoints
@@ -894,10 +898,9 @@ class CozmoSlamController:
         map_img = self.memory_map.copy()
         
         if len(self.robot_trajectory) > 1:
-            for i in range(1, len(self.robot_trajectory)):
-                pt1 = self.to_map_coords(self.robot_trajectory[i-1][0], self.robot_trajectory[i-1][1])
-                pt2 = self.to_map_coords(self.robot_trajectory[i][0], self.robot_trajectory[i][1])
-                cv2.line(map_img, pt1, pt2, (255, 200, 50), 1) 
+            step = max(1, len(self.robot_trajectory) // 100)
+            pts = [self.to_map_coords(x, y) for x, y in self.robot_trajectory[::step]]
+            cv2.polylines(map_img, [np.array(pts, dtype=np.int32)], isClosed=False, color=(255, 200, 50), thickness=1) 
                 
         if len(self.true_landmarks) >= 2:
             landmark_pts = []
@@ -1153,36 +1156,42 @@ class CozmoSlamController:
                 self.save_map_data()
             
             # === 2. ナビゲーションフェーズ ===
+            last_inference_time = 0.0
+            cached_detections = []
             while True:
                 current_time = time.time()
                 if current_time - last_head_cmd_time > 1.5:
                     cli.set_head_angle(self.TARGET_HEAD_ANGLE)
                     last_head_cmd_time = current_time
 
-                display_img = self._capture_stopped_frame(cli)
+                display_img = self._capture_frame(cli)
                 if display_img is not None and cli.pose is not None:
                     raw_theta = self.current_raw_theta
                     est_x, est_y, est_theta = self._get_estimated_pose(
                         self.current_raw_x, self.current_raw_y, raw_theta)
                     correction_triggered = False
-                    try:
-                        detections = self.detect_chess_pieces(display_img)
-                        old_count = len(self.true_landmarks)
-                        est_x, est_y, est_theta, correction_triggered = self.process_detections(
-                            detections, display_img.shape[1], self.current_raw_x,
-                            self.current_raw_y, raw_theta,
-                            allow_pose_correction=self._map_observation_correction_enabled,
-                            allow_new_landmarks=not self._map_loaded_from_json)
-                        if self._map_loaded_from_json and not self._map_observation_correction_enabled:
-                            self.last_correction = "Saved map / odometry only"
-                            for detection in detections:
-                                detection["map_status"] = "Chess (saved map)"
-                        self.draw_chess_detections(display_img, detections)
-                        if len(self.true_landmarks) != old_count:
-                            self.waypoints = self.generate_patrol_waypoints()
-                            self.current_waypoint_index = 0
-                    except Exception as error:
-                        self._report_detection_error(error)
+                    # 💡 高速化: YOLO推論を最大10Hz(0.1秒ごと)に制限し、CPU負荷を大幅削減
+                    if current_time - last_inference_time >= 0.10:
+                        last_inference_time = current_time
+                        try:
+                            cached_detections = self.detect_chess_pieces(display_img)
+                            old_count = len(self.true_landmarks)
+                            est_x, est_y, est_theta, correction_triggered = self.process_detections(
+                                cached_detections, display_img.shape[1], self.current_raw_x,
+                                self.current_raw_y, raw_theta,
+                                allow_pose_correction=self._map_observation_correction_enabled,
+                                allow_new_landmarks=not self._map_loaded_from_json)
+                            if self._map_loaded_from_json and not self._map_observation_correction_enabled:
+                                self.last_correction = "Saved map / odometry only"
+                                for detection in cached_detections:
+                                    detection["map_status"] = "Chess (saved map)"
+                            if len(self.true_landmarks) != old_count:
+                                self.waypoints = self.generate_patrol_waypoints()
+                                self.current_waypoint_index = 0
+                        except Exception as error:
+                            self._report_detection_error(error)
+
+                    self.draw_chess_detections(display_img, cached_detections)
                     self.robot_trajectory.append((est_x, est_y))
                     self.robot_trajectory = self.robot_trajectory[-2000:]
 
@@ -1191,21 +1200,30 @@ class CozmoSlamController:
                     if len(self.true_landmarks) == self.EXPECTED_LANDMARKS:
                         pts = np.array(list(self.true_landmarks.values()), dtype=np.float32)
                         hull = cv2.convexHull(pts)
+                        # dist > 0: 内部, dist < 0: 外部
                         dist = cv2.pointPolygonTest(hull, (float(est_x), float(est_y)), True)
-                        
-                        if dist < 10.0: 
+                        if dist < 0.0: 
                             out_of_bounds = True
 
                     if out_of_bounds:
                         cv2.putText(display_img, "VIRTUAL FENCE! ESCAPE", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                        cli.drive_wheels(-10.0, -10.0)
-                        time.sleep(0.4)
+                        # マップ中心に向かって旋回・脱出
+                        center_angle = math.atan2(self.map_center_y - est_y, self.map_center_x - est_x)
+                        turn_diff = self._wrap_angle(center_angle - est_theta)
+                        if abs(turn_diff) > 0.4:
+                            if turn_diff > 0: cli.drive_wheels(-14.0, 14.0)
+                            else: cli.drive_wheels(14.0, -14.0)
+                        else:
+                            cli.drive_wheels(20.0, 20.0)
+                        time.sleep(0.3)
                         self.target_x, self.target_y = None, None 
                     
-                    elif any(math.hypot(est_x - tx, est_y - ty) < 60.0 for tx, ty in self.true_landmarks.values()):
+                    elif any(math.hypot(est_x - tx, est_y - ty) < 55.0 for tx, ty in self.true_landmarks.values()):
                         cv2.putText(display_img, "WALL BLOCK! STOP", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                        cli.drive_wheels(-15.0, -15.0)
+                        cli.drive_wheels(-16.0, -16.0)
                         time.sleep(0.4)
+                        cli.drive_wheels(-12.0, 12.0)
+                        time.sleep(0.3)
                         self.target_x, self.target_y = None, None 
                     
                     elif self.target_x is not None and self.target_y is not None:
@@ -1214,22 +1232,24 @@ class CozmoSlamController:
                         angle_diff = angle_to_target - est_theta
                         angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
                         
-                        if dist_to_target < 15.0:
-                            print("🎯 目標地点に到着しました！")
+                        if dist_to_target < 25.0:
+                            print(f"🎯 目標地点({self.target_x:.0f}, {self.target_y:.0f})に到着しました！")
                             self.target_x, self.target_y = None, None
                             cli.drive_wheels(0.0, 0.0)
                             
-                            # 🚀 追加: 自律モードなら数秒待って次の目的地へ
+                            # 🚀 自律モードなら到着時に少し停止してから次へ
                             if self.autonomous_mode:
-                                time.sleep(1.0) # 到着したら1秒停止
+                                time.sleep(0.5)
                         
-                        elif abs(angle_diff) > 0.3:
+                        elif abs(angle_diff) > 0.35:
                             cv2.putText(display_img, "ADJUSTING HEADING", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-                            if angle_diff > 0: cli.drive_wheels(-12.0, 12.0)
-                            else: cli.drive_wheels(12.0, -12.0)
+                            if angle_diff > 0: cli.drive_wheels(-14.0, 14.0)
+                            else: cli.drive_wheels(14.0, -14.0)
                         else:
                             cv2.putText(display_img, "NAVIGATING TO TARGET", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                            cli.drive_wheels(22.0, 22.0)
+                            # 目標への微小な向きズレを補正しながらスムーズに前進
+                            turn_rate = max(-4.0, min(4.0, angle_diff * 8.0))
+                            cli.drive_wheels(25.0 - turn_rate, 25.0 + turn_rate)
                             
                     # 🚀 追加: 自律パトロールモードで目標地点が空の時、自動設定する
                     elif self.autonomous_mode and len(self.waypoints) > 0:

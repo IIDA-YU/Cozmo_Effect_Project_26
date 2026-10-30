@@ -1,0 +1,15 @@
+# Cozmo Effect Project 26 Dependencies
+# Recommended Python Version: 3.9.13
+
+# Cozmo Control
+pycozmo>=0.8.0
+
+# Computer Vision & Image Processing
+opencv-python>=4.10.0
+Pillow>=10.0.0
+numpy>=1.24.0,<2.1.0
+
+# Deep Learning / Object Detection (Visual SLAM & Tracking)
+ultralytics>=8.0.0
+torch
+torchvision

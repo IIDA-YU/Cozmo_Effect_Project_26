@@ -35,8 +35,10 @@ class ApplicationConfig:
 # 機体・PCごとに変更する設定
 # ---------------------------------------------------------
 CONFIG = ApplicationConfig(
+    # cozmo_ssid="Cozmo_613F59",  # 接続するCozmoのWi-Fi名
+    # return_ssid="ctc-g-171bde",       # 終了後に戻る学校・自宅のWi-Fi名
     cozmo_ssid="Cozmo_613F59",  # 接続するCozmoのWi-Fi名
-    return_ssid="ctc-g-171bde",       # 終了後に戻る学校・自宅のWi-Fi名
+    return_ssid="R0347",       # 終了後に戻る学校・自宅のWi-Fi名
     robot_id="Cozmo-A",        # 通信で使用する自分の機体名
     target_pc_ip="127.0.0.1",  # 自分のPCへのテスト用。他PCへ送る場合は変更する
     listen_port=50007,         # 座標を受信するポート番号
