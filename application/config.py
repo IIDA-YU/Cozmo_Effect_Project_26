@@ -14,7 +14,7 @@ class ApplicationConfig:
     cozmo_ssid: str
     return_ssid: str
     robot_id: str = "Cozmo-A"
-    target_pc_ip: str = "127.0.0.1"
+    target_pc_ip: str = "172.19.16.1"
     listen_port: int = 50007
 
     # モデルの保存場所はvisual_slam.pyの定義を共用する。
@@ -53,8 +53,8 @@ CONFIG = ApplicationConfig(
 
     # ArUcoマーカーID → その機体を操作するPCのIPアドレス
     target_ip_dict={
-        1: "172.18.67.189",
-        2: "172.18.67.198",
+        1: "127.0.0.1",
+        2: "172.19.16.1",
         3: "192.168.1.12",
         4: "192.168.1.13",
         5: "192.168.1.14",

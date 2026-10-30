@@ -374,6 +374,14 @@ class CameraViewer:
             cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
             self._window_created = True
 
+    def close_window(self):
+        if self._window_created:
+            try:
+                cv2.destroyWindow(self.window_name)
+            except cv2.error:
+                pass
+            self._window_created = False
+
     def display_once(self, frame_override=None):
         """最新映像を1回描画する。cv2.waitKeyは呼び出し側に集約する。"""
         frame = self._compose_display_frame(frame_override=frame_override)

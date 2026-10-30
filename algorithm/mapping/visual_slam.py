@@ -122,6 +122,7 @@ class CozmoSlamController:
 
         # 🚀 追加: 自律走行用の変数
         self.autonomous_mode = False
+        self.show_camera_window = True
         self.waypoints = []
         self.current_waypoint_index = 0
 
@@ -939,6 +940,10 @@ class CozmoSlamController:
         
         cv2.putText(map_img, f"Chess: {len(self.true_landmarks)}/{self.EXPECTED_LANDMARKS}",
                     (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 180), 2)
+        cam_str = "ON" if getattr(self, "show_camera_window", True) else "OFF [V]"
+        mode_str = "AUTO" if self.autonomous_mode else "MANUAL"
+        cv2.putText(map_img, f"Mode: {mode_str} | Cam: {cam_str}", (10, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255) if self.autonomous_mode else (180, 180, 180), 1)
         cv2.putText(map_img, self.last_correction, (10, self.MAP_SIZE-12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.36, (30, 30, 30), 1)
         # 縮尺を変えても距離感を確認できる実寸の物差し（ロボットの丸印は縮尺外）。
@@ -1155,6 +1160,11 @@ class CozmoSlamController:
                 # 6個そろった段階で保存。走行終了まで待たず、次回から使用可能にする。
                 self.save_map_data()
             
+            # マップ完成後は常時OFFにして軽量化（Vキーでいつでも表示切替可能）
+            self.show_camera_window = False
+            self.camera_viewer.close_window()
+            print("💡 マップ準備完了: 動作軽量化のためカメラ映像を非表示にしました（Vキーで表示切替可能）")
+
             # === 2. ナビゲーションフェーズ ===
             last_inference_time = 0.0
             cached_detections = []
@@ -1191,7 +1201,8 @@ class CozmoSlamController:
                         except Exception as error:
                             self._report_detection_error(error)
 
-                    self.draw_chess_detections(display_img, cached_detections)
+                    if self.show_camera_window:
+                        self.draw_chess_detections(display_img, cached_detections)
                     self.robot_trajectory.append((est_x, est_y))
                     self.robot_trajectory = self.robot_trajectory[-2000:]
 
@@ -1262,13 +1273,13 @@ class CozmoSlamController:
                         cli.drive_wheels(0.0, 0.0)
 
                     # --- UI表示の更新 ---
-                    if correction_triggered:
-                        cv2.putText(display_img, "SLAM FIXED!", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
-                        
-                    mode_text = "AUTO PATROL MODE" if self.autonomous_mode else "MANUAL (CLICK) MODE"
-                    cv2.putText(display_img, mode_text, (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if self.autonomous_mode else (255, 255, 255), 2)
+                    if self.show_camera_window:
+                        if correction_triggered:
+                            cv2.putText(display_img, "SLAM FIXED!", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+                        mode_text = "AUTO PATROL MODE" if self.autonomous_mode else "MANUAL (CLICK) MODE"
+                        cv2.putText(display_img, mode_text, (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255) if self.autonomous_mode else (255, 255, 255), 2)
+                        self.camera_viewer.display_once(frame_override=display_img)
 
-                    self.camera_viewer.display_once(frame_override=display_img)
                     map_img = self.draw_memory_map(est_x, est_y, est_theta)
                     cv2.imshow(self.MAP_WINDOW_NAME, map_img)
                     
@@ -1284,6 +1295,14 @@ class CozmoSlamController:
                         self._set_estimated_pose(self.current_raw_x, self.current_raw_y,
                                                  raw_theta, est_x, est_y, est_theta+0.2)
                         print("🔄 コンパスを右に修正しました")
+                    elif key in (ord('v'), ord('V')):  # 🚀 追加: カメラ映像の表示/非表示切替
+                        self.show_camera_window = not self.show_camera_window
+                        if self.show_camera_window:
+                            self.camera_viewer.open_window()
+                            print("📷 カメラ映像: 表示 (ON)")
+                        else:
+                            self.camera_viewer.close_window()
+                            print("📷 カメラ映像: 非表示 (OFF - 軽量化モード)")
                     elif key == ord('p'):  # 🚀 追加: パトロールのオン・オフ切り替え
                         self.autonomous_mode = not self.autonomous_mode
                         if self.autonomous_mode:
