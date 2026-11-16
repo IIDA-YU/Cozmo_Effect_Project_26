@@ -115,15 +115,37 @@ def run_autonomous_mode(cli, config, camera_viewer):
         _start_module(face_manager)
         started_modules.append(face_manager)
 
+        # CollisionPreventionは待機型クラスのため _start_module は不要
         preventer = CollisionPrevention(
             cli,
             face_manager=face_manager,
             camera_viewer=camera_viewer,
         )
-        _start_module(preventer)
-        started_modules.append(preventer)
 
-        # 2. 段差・機体・対象物・ArUcoマーカーの検知を起動する。
+        # 2. すれ違い双方向通信サーバー(receiver)を先に起動する。
+        #    相手から通信された際、自分の最新座標を自動で返せるようにコールバックを渡す。
+        def get_my_status():
+            if cli.pose:
+                return {
+                    "x": float(cli.pose.position.x),
+                    "y": float(cli.pose.position.y),
+                }
+            return {"x": 0.0, "y": 0.0}
+
+        receiver = CoordCommunication(
+            port=config.listen_port,
+            robot_id=config.robot_id,
+            get_local_info_cb=get_my_status,
+        )
+        receiver_thread = threading.Thread(
+            target=receiver.start_server,
+            name="CoordinateReceiver",
+            daemon=True,
+        )
+        receiver_thread.start()
+        time.sleep(0.5)
+
+        # 3. 段差・機体・対象物・ArUcoマーカーの検知を起動する。
         step_detector = StepDetector(cli, preventer)
         _start_module(step_detector)
         started_modules.append(step_detector)
@@ -144,10 +166,13 @@ def run_autonomous_mode(cli, config, camera_viewer):
         _start_module(cube_tracker)
         started_modules.append(cube_tracker)
 
+        # ★ ArUcoCoordinateTracker に comm=receiver と robot_id を渡して双方向通信させる
         aruco_tracker = ArucoCoordinateTracker(
             cli,
             target_ip_dict=config.target_ip_dict,
             camera_viewer=camera_viewer,
+            comm=receiver,
+            robot_id=config.robot_id,
         )
         _start_module(aruco_tracker)
         started_modules.append(aruco_tracker)
@@ -155,17 +180,7 @@ def run_autonomous_mode(cli, config, camera_viewer):
         # 後から起動した検出器にカメラ設定を変更されても、SLAM時の値へ戻す。
         camera_viewer.ensure_camera_settings(announce=True)
 
-        # 3. 座標の受信を別スレッドで開始する。
-        receiver = CoordCommunication(port=config.listen_port)
-        receiver_thread = threading.Thread(
-            target=receiver.start_server,
-            name="CoordinateReceiver",
-            daemon=True,
-        )
-        receiver_thread.start()
-        time.sleep(1.0)  # 元コードと同じ起動待ち。受信準備完了の確認ではない。
-
-        # 自分の座標を0.2秒間隔で送信する。
+        # 自分の座標を0.2秒間隔で環境側(target_pc_ip)へ送信する。
         coord_sender = CoordinateSender(
             cli,
             target_ip=config.target_pc_ip,
@@ -180,7 +195,7 @@ def run_autonomous_mode(cli, config, camera_viewer):
         _start_module(roamer)
         started_modules.append(roamer)
 
-        print("\n🚀 自律走行・双方向通信・機体識別を開始しました！")
+        print("\n🚀 自律走行・すれ違い双方向通信・機体識別を開始しました！")
         print("💡 B:明るく / N:暗く / M:自動・手動 / 0:初期値 / Q・Esc:終了")
 
         # 5. メインスレッドで画面を更新する。キー処理の詳細はカメラ側に任せる。
@@ -204,27 +219,33 @@ def run_autonomous_mode(cli, config, camera_viewer):
 # 通信テスト：Cozmoに接続せず送受信を確認する
 # ---------------------------------------------------------
 def run_receive_debug(config):
-    """Cozmoに接続せず、他PCからの座標を受信する。"""
-    receiver = CoordCommunication(port=config.listen_port)
+    """Cozmoに接続せず、他PCからの座標を受信（＆自動応答）する。"""
+    receiver = CoordCommunication(
+        port=config.listen_port,
+        robot_id=config.robot_id,
+    )
     receiver.start_server()
 
 
 def run_send_debug(config):
-    """指定したPCへ、ダミー座標を1秒間隔で10回送信する。"""
-    communication = CoordCommunication()
+    """指定したPCへ、ダミー座標を1秒間隔で10回双方向送信テストする。"""
+    communication = CoordCommunication(
+        port=config.listen_port,
+        robot_id=config.robot_id,
+    )
     test_ip = input(
         "送信先PCのIPアドレスを入力 (自分のPCなら 127.0.0.1): "
     ).strip()
-    print(f"\n{test_ip} へテスト送信を開始します...")
+    print(f"\n{test_ip} へ双方向通信テストを開始します...")
     for index in range(10):
-        success = communication.send_data(
+        reply = communication.exchange_data(
             test_ip,
             index * 10.0,
             index * 20.0,
             robot_id=config.robot_id,
         )
-        result = "✅ 成功" if success else "❌ 失敗"
-        print(f"送信 {index + 1}/10: {result}")
+        result = f"✅ 双方向成功 (相手応答: {reply})" if reply else "❌ 失敗"
+        print(f"通信 {index + 1}/10: {result}")
         time.sleep(1.0)
 
 
@@ -238,9 +259,9 @@ def _start_module(module_obj):
         if callable(method):
             method()
             return
-    raise AttributeError(
-        f"{module_obj.__class__.__name__} に起動メソッド"
-        "(start/run/begin/activate)がありません。"
+    # 起動メソッドを持たないクラスでもエラーで落とさずスキップする
+    print(
+        f"ℹ️ {module_obj.__class__.__name__} は常駐スレッド不要のためそのまま待機します。"
     )
 
 

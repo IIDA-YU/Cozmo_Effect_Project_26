@@ -37,7 +37,7 @@ class ApplicationConfig:
 CONFIG = ApplicationConfig(
     # cozmo_ssid="Cozmo_613F59",  # 接続するCozmoのWi-Fi名
     # return_ssid="ctc-g-171bde",       # 終了後に戻る学校・自宅のWi-Fi名
-    cozmo_ssid="Cozmo_613F59",  # 接続するCozmoのWi-Fi名
+    cozmo_ssid="Cozmo_42A832",  # 接続するCozmoのWi-Fi名
     return_ssid="R0347",       # 終了後に戻る学校・自宅のWi-Fi名
     robot_id="Cozmo-A",        # 通信で使用する自分の機体名
     target_pc_ip="127.0.0.1",  # 自分のPCへのテスト用。他PCへ送る場合は変更する
@@ -53,7 +53,7 @@ CONFIG = ApplicationConfig(
 
     # ArUcoマーカーID → その機体を操作するPCのIPアドレス
     target_ip_dict={
-        1: "172.18.67.189",
+        1: "98:59:7A:E2:CA:79",
         2: "172.18.67.198",
         3: "192.168.1.12",
         4: "192.168.1.13",

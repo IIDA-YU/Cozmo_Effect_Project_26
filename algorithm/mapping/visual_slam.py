@@ -321,8 +321,8 @@ class CozmoSlamController:
         """
         detection.pop("distance", None)
         if check_range and detection["class_name"] not in self.distance_scales:
-            detection["map_status"] = "Uncalibrated / press C"
-            return None
+            # 距離校正は任意。未校正のクラスは既定倍率1.0で概算する。
+            detection["map_status"] = "Uncalibrated / default scale"
         if detection.get("clipped", False):
             detection["map_status"] = "Clipped box / retry"
             return None
@@ -1131,7 +1131,7 @@ class CozmoSlamController:
 
             last_head_cmd_time = time.time()
             if not map_loaded:
-                # JSONがないときだけ、明るさ・距離校正→回転マッピングを行う。
+                # JSONがないときは、現在のカメラ設定と既定倍率で自動マッピングする。
                 self.true_landmarks.clear()
                 self.candidate_landmarks.clear()
                 self.distance_history.clear()
@@ -1139,10 +1139,9 @@ class CozmoSlamController:
                 self.last_observations = []
                 self.landmark_id_counter = 0
                 self.memory_map.fill(127)
-                if not self._wait_for_camera_adjustment(cli):
-                    return
                 self._camera_adjustment_completed = True
                 self._map_observation_correction_enabled = True
+                print("▶️ カメラ・距離校正をスキップし、既定設定でマッピングを開始します。")
                 if not self._scan_landmarks(cli):
                     return
             else:
