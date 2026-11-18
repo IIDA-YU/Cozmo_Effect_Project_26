@@ -207,7 +207,7 @@ class CoordCommunication:
     def __init__(
         self,
         port=50007,
-        bt_channel=4,
+        bt_channel=22,
         robot_id="Cozmo-01",
         get_local_info_cb=None,
         on_receive_info_cb=None,
